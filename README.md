@@ -26,7 +26,7 @@ brew install latexml
 
 ```bash
 # 进入 webapp 目录
-cd webapp
+cd ChatHTML
 # 启动 HTTP 服务器
 python3 app.py
 ```
