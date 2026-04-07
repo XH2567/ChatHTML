@@ -33,10 +33,41 @@ python3 app.py
 启动成功后，在浏览器访问：`http://127.0.0.1:8000`
 
 ### 3. 公网分享 (基于 Cloudflare 免费隧道)
-如果你想将本地正在运行的 Web 服务通过公网分享给同学协助阅读，可以使用 Cloudflare Quick Tunnels 进行内网穿透：
+如果你想将本地正在运行的 Web 服务通过公网分享给同学协助阅读，可以使用 Cloudflare Quick Tunnels 进行内网穿透。
+
+首先安装 `cloudflared` 命令行工具：
+
+**Ubuntu / Debian:**
+```bash
+curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared.deb
+```
+或
+```bash
+# 1) 导入 Cloudflare APT GPG key
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
+  | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+
+# 2) 添加 cloudflared 软件源
+echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" \
+  | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
+
+# 3) 安装 cloudflared
+sudo apt update
+sudo apt install -y cloudflared
+
+# 4) 验证安装
+cloudflared --version
+```
+
+**macOS:**
+```bash
+brew install cloudflared
+```
+
+然后启动内网穿透：
 
 ```bash
-# 需提前安装好 cloudflared 命令行工具
 cloudflared tunnel --url http://127.0.0.1:8000
 ```
 运行后，终端会输出一个类似 `https://xxxx.trycloudflare.com` 的公网链接。你的同学可以直接通过此链接访问应用并使用。
