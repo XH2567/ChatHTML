@@ -33,7 +33,6 @@ python3 app.py
 启动成功后，在浏览器访问：`http://127.0.0.1:8000`
 
 ### 3. 公网分享 (基于 Cloudflare 免费隧道)
-如果你想将本地正在运行的 Web 服务通过公网分享给同学协助阅读，可以使用 Cloudflare Quick Tunnels 进行内网穿透。
 
 首先安装 `cloudflared` 命令行工具：
 
@@ -70,7 +69,7 @@ brew install cloudflared
 ```bash
 cloudflared tunnel --url http://127.0.0.1:8000
 ```
-运行后，终端会输出一个类似 `https://xxxx.trycloudflare.com` 的公网链接。你的同学可以直接通过此链接访问应用并使用。
+运行后，终端会输出一个类似 `https://xxxx.trycloudflare.com` 的公网链接。
 
 ---
 
