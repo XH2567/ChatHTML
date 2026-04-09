@@ -76,3 +76,113 @@ def safe_members(tar: tarfile.TarFile) -> list[tarfile.TarInfo]:
     return accepted
 
 
+def extract_safely(archive_path: Path, dest_dir: Path) -> tuple[int, list[str], int]:
+    start = time.monotonic()
+    extracted_preview: list[str] = []
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive_path, mode="r:gz") as tar:
+        members = safe_members(tar)
+        count = 0
+        for member in members:
+            elapsed = time.monotonic() - start
+            if elapsed > MAX_EXTRACT_SECONDS:
+                raise ArchiveRejected(f"解压超时: {elapsed:.2f}s")
+            target = (dest_dir / member.name).resolve()
+            if dest_dir.resolve() not in target.parents and target != dest_dir.resolve():
+                raise ArchiveRejected(f"目标路径越界: {member.name}")
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            if member.isfile():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                extracted = tar.extractfile(member)
+                if extracted is None:
+                    raise ArchiveRejected(f"无法读取文件: {member.name}")
+                with target.open("wb") as fh:
+                    shutil.copyfileobj(extracted, fh)
+                count += 1
+                if len(extracted_preview) < 25:
+                    extracted_preview.append(member.name)
+            else:
+                raise ArchiveRejected(f"拒绝未知条目类型: {member.name}")
+    return count, extracted_preview, len(members)
+
+
+def persist_original(payload: bytes, archive_name: str, ctx: ExtractionContext) -> Path:
+    ctx.original_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = ctx.original_dir / archive_name
+    with archive_path.open("wb") as fh:
+        fh.write(payload)
+    return archive_path
+
+
+def process_job(state: JobState, payload: bytes, archive_name: str, archive_url: str | None = None) -> JobState:
+  ctx = ExtractionContext(JOBS_DIR / state.job_id, state.job_id)
+  ctx.ensure()
+  started_at = time.monotonic()
+  state.status = "processing"
+  state.original_name = archive_name
+  state.original_path = str(ctx.original_dir / archive_name)
+  state.archive_url = archive_url
+  state.archive_size = len(payload)
+  state.errors = []
+  state.warnings = []
+  state.stage_details = []
+  store.save(state)
+
+  archive_path = persist_original(payload, archive_name, ctx)
+  state.status = "validating"
+  store.save(state)
+
+  try:
+    with tarfile.open(archive_path, mode="r:gz") as tar:
+      members = tar.getmembers()
+      state.archive_members = len(members)
+      state.archive_total_size = sum(max(0, member.size) for member in members)
+      store.save(state)
+
+    state.status = "extracting"
+    count, preview, _member_count = extract_safely(archive_path, ctx.src_dir)
+    state.extract_count = count
+    state.extracted_preview = preview
+    state.root_dir = str(ctx.src_dir)
+    store.save(state)
+
+    state.status = "analyzing"
+    store.save(state)
+    pipeline = run_pipeline(ctx.src_dir, ctx.normalized_dir, ctx.overlay_dir, ctx.out_dir, ctx.logs_dir)
+    state.root_tex = pipeline["root"]["root_tex"]
+    state.root_reason = pipeline["root"]["root_reason"]
+    state.root_candidates = pipeline["root"]["candidates"]
+    state.manifest = pipeline["manifest"]
+    state.preflight = pipeline["preflight"]
+    state.normalized = pipeline["normalized"]
+    state.overlay = pipeline["overlay"]
+    state.conversion = pipeline["conversion"]
+    state.analysis = pipeline["analysis"]
+    state.quality = pipeline["quality"]
+    state.stage_details = pipeline["stage_details"]
+    state.artifacts = {
+      "xml": pipeline["conversion"]["artifacts"].get("xml") or "",
+      "html": pipeline["conversion"]["artifacts"].get("html") or "",
+      "latexml_log": pipeline["conversion"]["artifacts"].get("latexml_log") or "",
+      "latexmlpost_log": pipeline["conversion"]["artifacts"].get("latexmlpost_log") or "",
+      "overlay_manifest": "overlay/overlay_manifest.json",
+      "normalized_root": f"normalized/{pipeline['normalized']['latexml_root']}",
+    }
+    (ctx.meta_dir / "manifest.json").write_text(json.dumps(state.manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    (ctx.meta_dir / "pipeline.json").write_text(json.dumps(pipeline, indent=2, ensure_ascii=False), encoding="utf-8")
+    state.status = "completed" if pipeline["conversion"]["success"] else "partial"
+  except (ArchiveRejected, tarfile.TarError, OSError, UnicodeError) as exc:
+    state.status = "error"
+    state.errors = (state.errors or []) + [str(exc)]
+  except Exception as exc:
+    state.status = "error"
+    state.errors = (state.errors or []) + [str(exc)]
+  finally:
+    state.duration_seconds = round(time.monotonic() - started_at, 4)
+    store.save(state)
+  return state
+
+
+
