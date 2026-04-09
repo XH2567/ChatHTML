@@ -798,19 +798,34 @@ def _inject_chat_feature(html_text: str) -> str:
   #ai-sidebar {
     position: fixed;
     top: 0;
-    right: -400px;
+    right: 0;
+    transform: translateX(100%);
     width: 380px;
     height: 100%;
     background: white;
     box-shadow: -4px 0 15px rgba(0,0,0,0.1);
     z-index: 10001;
-    transition: right 0.3s ease;
+    transition: transform 0.3s ease;
     display: flex;
     flex-direction: column;
     font-family: sans-serif;
   }
   #ai-sidebar.open {
-    right: 0;
+    transform: translateX(0);
+  }
+  
+  #ai-sidebar-resizer {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -3px;
+    width: 6px;
+    cursor: ew-resize;
+    z-index: 10002;
+    background: transparent;
+  }
+  #ai-sidebar-resizer:hover, #ai-sidebar-resizer.dragging {
+    background: rgba(0, 123, 255, 0.3);
   }
   
   #ai-sidebar-header {
@@ -946,6 +961,7 @@ def _inject_chat_feature(html_text: str) -> str:
 <button id="ai-fab">💡 询问 AI</button>
 
 <div id="ai-sidebar">
+  <div id="ai-sidebar-resizer" title="左右拖动调整宽度"></div>
   <div id="ai-sidebar-header">
     <span>AI 论文助手</span>
     <div>
@@ -986,6 +1002,7 @@ def _inject_chat_feature(html_text: str) -> str:
 (function() {
   const fab = document.getElementById('ai-fab');
   const sidebar = document.getElementById('ai-sidebar');
+  const resizer = document.getElementById('ai-sidebar-resizer');
   const chatContent = document.getElementById('ai-chat-content');
   const chatInput = document.getElementById('ai-chat-input');
   const chatSend = document.getElementById('ai-chat-send');
@@ -996,6 +1013,46 @@ def _inject_chat_feature(html_text: str) -> str:
   const chatModel = document.getElementById('ai-model');
   const chatApiKey = document.getElementById('ai-apikey');
   const settingsSaved = document.getElementById('ai-settings-saved');
+
+  /* ---------- Resize Logic ---------- */
+  let isResizing = false;
+  
+  const savedWidth = localStorage.getItem('ai-sidebar-width');
+  if (savedWidth) {
+    sidebar.style.width = savedWidth + 'px';
+  }
+
+  resizer.addEventListener('mousedown', function(e) {
+    isResizing = true;
+    resizer.classList.add('dragging');
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'ew-resize';
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!isResizing) return;
+    let newWidth = window.innerWidth - e.clientX;
+    const minWidth = 280;
+    const maxWidth = window.innerWidth * 0.8;
+    if (newWidth < minWidth) newWidth = minWidth;
+    if (newWidth > maxWidth) newWidth = maxWidth;
+    // Disable transition temporarily while dragging
+    sidebar.style.transition = 'none';
+    sidebar.style.width = newWidth + 'px';
+  });
+
+  document.addEventListener('mouseup', function(e) {
+    if (isResizing) {
+      isResizing = false;
+      resizer.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      // Restore transition
+      sidebar.style.transition = 'transform 0.3s ease';
+      localStorage.setItem('ai-sidebar-width', parseInt(sidebar.style.width, 10));
+    }
+  });
+  /* ---------------------------------- */
 
   settingsToggle.addEventListener('click', function() {
     if (settingsPanel.style.display === 'none') {
@@ -1022,11 +1079,18 @@ def _inject_chat_feature(html_text: str) -> str:
   let chatHistories = {};
   
   // Storage key is based on current URL path
-  const storageKey = 'ai-chats-' + window.location.pathname;
+  const basePath = window.location.pathname.replace(new RegExp("/out/main\\\\.html$"), "").replace(new RegExp("/$"), "");
+  const storageKey = 'ai-chats-' + basePath;
+  const legacyKey = 'ai-chats-' + window.location.pathname;
 
   function loadChatHistory() {
     try {
-      const saved = localStorage.getItem(storageKey);
+      let saved = localStorage.getItem(storageKey);
+      if (!saved && storageKey !== legacyKey) {
+         saved = localStorage.getItem(legacyKey);
+         if (saved) localStorage.setItem(storageKey, saved); // Migrate to the canonical key
+      }
+      
       if (saved) {
         chatHistories = JSON.parse(saved);
         // Naive re-anchoring of markers
@@ -1037,27 +1101,40 @@ def _inject_chat_feature(html_text: str) -> str:
             const contextSnippet = chatMeta.contextText.substring(0, 15).trim();
             if(!contextSnippet) return;
             
-            const treeWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-            while(treeWalker.nextNode()) {
-              const node = treeWalker.currentNode;
-              if (node.nodeValue.includes(contextSnippet)) {
-                const marker = document.createElement('span');
-                marker.className = 'ai-marker';
-                marker.innerHTML = '💬';
-                marker.title = '查看与AI的对话';
-                marker.dataset.chatid = chatId;
-                
-                marker.addEventListener('click', function(e) {
-                  e.stopPropagation();
-                  activeChatId = this.dataset.chatid;
-                  chatContent.innerHTML = chatHistories[activeChatId].html;
-                  currentSelectionParams = null;
-                  sidebar.classList.add('open');
-                });
-                
-                node.parentNode.insertBefore(marker, node.nextSibling);
-                break; // only place one marker per chat
+            const marker = document.createElement('span');
+            marker.className = 'ai-marker';
+            marker.innerHTML = '💬';
+            marker.title = '查看与AI的对话';
+            marker.dataset.chatid = chatId;
+            
+            marker.addEventListener('click', function(e) {
+              e.stopPropagation();
+              activeChatId = this.dataset.chatid;
+              chatContent.innerHTML = chatHistories[activeChatId].html;
+              currentSelectionParams = null;
+              sidebar.classList.add('open');
+            });
+
+            // More robust matching: search within block elements instead of strict TextNodes
+            // This prevents failures when highlighted text contains inline tags (e.g. math, bold)
+            const blocks = document.querySelectorAll('p, li, td, h1, h2, h3, h4, h5, h6, div.ltx_para');
+            let placed = false;
+            for (let i = 0; i < blocks.length; i++) {
+              if (blocks[i].textContent.includes(contextSnippet)) {
+                blocks[i].appendChild(marker);
+                placed = true;
+                break; // place only one
               }
+            }
+            
+            // Fallback: If not found in a specific block, append to body so history isn't lost
+            if (!placed) {
+               marker.style.position = 'fixed';
+               marker.style.bottom = '20px';
+               marker.style.left = '20px';
+               marker.style.zIndex = '9999';
+               marker.title = '未找到原文本位置 - 查看对话';
+               document.body.appendChild(marker);
             }
           }
         });
@@ -1072,7 +1149,11 @@ def _inject_chat_feature(html_text: str) -> str:
   }
 
   // Load immediately
-  window.addEventListener('DOMContentLoaded', loadChatHistory);
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', loadChatHistory);
+  } else {
+    loadChatHistory();
+  }
 
   document.getElementById('ai-api-help').addEventListener('click', function(e) {
     e.preventDefault();
