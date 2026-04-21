@@ -2,8 +2,9 @@ use crate::models::SourceMode;
 use crate::store::JobStore;
 use axum::{
     Json,
+    body::Body,
     extract::{Multipart, Path, State},
-    http::StatusCode,
+    http::{StatusCode, header},
     response::IntoResponse,
 };
 use serde::Deserialize;
@@ -93,10 +94,10 @@ pub async fn create_job(
 #[derive(Deserialize)]
 pub struct ChatRequest {
     pub query: String,
-    pub context: String,
-    pub model: String,
-    pub api_key: String,
-    pub full_paper: String,
+    pub _context: String,
+    pub _model: String,
+    pub _api_key: String,
+    pub _full_paper: String,
 }
 
 pub async fn ai_chat_proxy(Json(req): Json<ChatRequest>) -> impl IntoResponse {
@@ -105,4 +106,43 @@ pub async fn ai_chat_proxy(Json(req): Json<ChatRequest>) -> impl IntoResponse {
     Json(serde_json::json!({
         "reply": format!("AI 收到你的问题：'{}'。正在针对论文背景进行分析...", req.query)
     }))
+}
+
+/// 获取任务产物文件（HTML, 图片, 日志等）
+/// 路径示例: /api/jobs/uuid/artifacts/out/main.html
+pub async fn get_artifact(
+    State(state): State<Arc<AppState>>,
+    // Path((id, path)) 自动拆解 URL 中的 UUID 和剩余的长路径
+    Path((job_id, file_path)): Path<(Uuid, String)>,
+) -> impl IntoResponse {
+    // 1. 调用 store 获取物理路径
+    let full_path = state.store.get_job_file_path(job_id, "", &file_path);
+
+    // 2. 安全检查：确保文件存在且是文件
+    if !full_path.exists() || !full_path.is_file() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    // 3. 自动识别 MIME 类型
+    let mime = mime_guess::from_path(&full_path).first_or_octet_stream();
+
+    // 4. 异步读取文件内容
+    match tokio::fs::read(&full_path).await {
+        Ok(contents) => {
+            // 5. 构造带正确 Header 的响应
+            (
+                [
+                    (header::CONTENT_TYPE, mime.as_ref()),
+                    // 允许浏览器缓存这些静态产物以提高性能
+                    (header::CACHE_CONTROL, "public, max-age=3600"),
+                ],
+                Body::from(contents),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::error!("读取产物文件失败: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }

@@ -43,6 +43,8 @@ async fn main() {
         .route("/api/jobs/:id", get(routes::get_job))
         // AI 聊天代理
         .route("/api/chat", post(routes::ai_chat_proxy))
+        // 获取任务产物文件
+        .route("/api/jobs/:id/artifacts/*path", get(routes::get_artifact))
         // 绑定共享状态
         .with_state(app_state)
         // 开启日志追踪和跨域支持

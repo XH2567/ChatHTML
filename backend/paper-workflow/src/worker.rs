@@ -2,10 +2,12 @@ use crate::models::{JobState, JobStatus, SourceMode, StageDetail, StageStatus};
 use crate::store::JobStore;
 use anyhow::{Result, anyhow};
 use flate2::read::GzDecoder;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tar::Archive;
 use tokio::fs;
+use tokio::process::Command;
+use tokio::time::{timeout, Duration};
 
 /// 整个任务的后台入口
 pub async fn process_job(mut job: JobState, store: Arc<JobStore>) {
@@ -18,6 +20,17 @@ pub async fn process_job(mut job: JobState, store: Arc<JobStore>) {
     if let Err(e) = result {
         job.status = JobStatus::Error;
         job.errors.push(format!("工作流中断: {}", e));
+    } else {
+        job.status = JobStatus::Completed;
+    }
+
+    let _ = store.save_job(&job).await;
+
+    let conversion_result = run_latexml_pipeline(&mut job, &store).await;
+
+    if let Err(e) = conversion_result {
+        job.status = JobStatus::Error;
+        job.errors.push(format!("编译失败: {}", e));
     } else {
         job.status = JobStatus::Completed;
     }
@@ -152,4 +165,104 @@ async fn download_from_arxiv(arxiv_id: &str) -> Result<Vec<u8>> {
 
     let resp = client.get(url).send().await?.error_for_status()?;
     Ok(resp.bytes().await?.to_vec())
+}
+
+async fn find_root_tex(src_dir: &Path) -> Result<PathBuf> {
+    let mut entries = fs::read_dir(src_dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("tex") {
+            let content = fs::read_to_string(&path).await.unwrap_or_default();
+            if content.contains("\\documentclass") && content.contains("\\begin{document}") {
+                return Ok(path);
+            }
+        }
+    }
+    Err(anyhow!("未能在源码中找到主 .tex 文件"))
+}
+
+async fn run_latexml_pipeline(job: &mut JobState, store: &JobStore) -> Result<()> {
+    let src_dir = store.get_job_file_path(job.job_id, "src", "");
+    let out_dir = store.get_job_file_path(job.job_id, "out", "");
+
+    // 1. 识别主文件
+    update_stage(
+        job,
+        "解析结构",
+        StageStatus::Running,
+        "正在识别主 LaTeX 文件...",
+    )
+    .await;
+    let root_tex_path = find_root_tex(&src_dir).await?;
+    let root_tex_filename = root_tex_path.file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| anyhow!("非法的文件名"))?;
+
+    job.status = JobStatus::Processing;
+    store.save_job(job).await?;
+
+    let compile_timeout = Duration::from_secs(300); 
+
+    // 2. 运行 LaTeXML (生成 XML)
+    update_stage(
+        job,
+        "LaTeXML 编译",
+        StageStatus::Running,
+        "正在将 TeX 转换为 XML...",
+    )
+    .await;
+    let xml_output = out_dir.join("main.xml");
+
+    let mut latexml_cmd = Command::new("latexml")
+        .arg("--dest")
+        .arg(&xml_output)
+        .arg("--noparse") 
+        .arg(&root_tex_filename)
+        .current_dir(&src_dir)
+        .spawn()?;
+
+    match timeout(compile_timeout, latexml_cmd.wait()).await {
+        Ok(Ok(status)) if status.success() => {
+            tracing::info!("XML 生成成功");
+        }
+        Ok(_) => {
+            let _ = latexml_cmd.kill().await;
+            return Err(anyhow!("LaTeXML 编译失败，请检查 LaTeX 语法或宏包依赖"));
+        }
+        Err(_) => {
+            let _ = latexml_cmd.kill().await;
+            return Err(anyhow!("LaTeXML 编译超时，任务已自动终止"));
+        }
+    }
+
+    // 3. 运行 LaTeXMLPost (生成 HTML)
+    update_stage(
+        job,
+        "HTML 生成",
+        StageStatus::Running,
+        "正在渲染最终网页...",
+    )
+    .await;
+
+    let html_output = out_dir.join("main.html");
+
+    let status = Command::new("latexmlpost")
+        .arg("--dest")
+        .arg(&html_output)
+        .arg(&xml_output)
+        .current_dir(&src_dir)
+        .status()
+        .await?;
+
+    if status.success() {
+        job.artifacts
+            .insert("html".to_string(), "out/main.html".to_string());
+        job.artifacts
+            .insert("xml".to_string(), "out/main.xml".to_string());
+        update_stage(job, "HTML 生成", StageStatus::Done, "转换成功").await;
+    } else {
+        return Err(anyhow!("LaTeXMLPost 执行失败"));
+    }
+
+    Ok(())
 }
