@@ -24,6 +24,16 @@ export const jobApi = {
     return data;
   },
 
+  // 删除单个任务
+  async deleteJob(id: string): Promise<void> {
+    await api.delete(`/jobs/${id}`);
+  },
+
+  // 删除所有任务
+  async deleteAllJobs(): Promise<void> {
+    await api.delete('/jobs');
+  },
+
   // 统一管理 AI 聊天请求
   async askAi(payload: {
     query: string;

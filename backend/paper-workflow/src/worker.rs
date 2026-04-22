@@ -2,30 +2,31 @@ use crate::models::{JobState, JobStatus, SourceMode, StageDetail, StageStatus};
 use crate::store::JobStore;
 use anyhow::{Result, anyhow};
 use flate2::read::GzDecoder;
+use pathdiff::diff_paths;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tar::Archive;
 use tokio::fs;
 use tokio::process::Command;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 /// 整个任务的后台入口
 pub async fn process_job(mut job: JobState, store: Arc<JobStore>) {
+    // 第一阶段：下载和解压
     let result = match job.source_mode {
         SourceMode::Arxiv => run_arxiv_workflow(&mut job, &store).await,
         SourceMode::Upload => run_upload_workflow(&mut job, &store).await,
     };
 
-    // 处理最终结果
+    // 如果第一阶段失败，保存错误状态并返回
     if let Err(e) = result {
         job.status = JobStatus::Error;
         job.errors.push(format!("工作流中断: {}", e));
-    } else {
-        job.status = JobStatus::Completed;
+        let _ = store.save_job(&job).await;
+        return;
     }
 
-    let _ = store.save_job(&job).await;
-
+    // 第二阶段：LaTeXML 转换
     let conversion_result = run_latexml_pipeline(&mut job, &store).await;
 
     if let Err(e) = conversion_result {
@@ -184,6 +185,8 @@ async fn find_root_tex(src_dir: &Path) -> Result<PathBuf> {
 async fn run_latexml_pipeline(job: &mut JobState, store: &JobStore) -> Result<()> {
     let src_dir = store.get_job_file_path(job.job_id, "src", "");
     let out_dir = store.get_job_file_path(job.job_id, "out", "");
+    let out_rel_to_src =
+        diff_paths(&out_dir, &src_dir).ok_or_else(|| anyhow!("无法计算相对路径"))?;
 
     // 1. 识别主文件
     update_stage(
@@ -194,14 +197,15 @@ async fn run_latexml_pipeline(job: &mut JobState, store: &JobStore) -> Result<()
     )
     .await;
     let root_tex_path = find_root_tex(&src_dir).await?;
-    let root_tex_filename = root_tex_path.file_name()
+    let root_tex_filename = root_tex_path
+        .file_name()
         .and_then(|s| s.to_str())
         .ok_or_else(|| anyhow!("非法的文件名"))?;
 
     job.status = JobStatus::Processing;
     store.save_job(job).await?;
 
-    let compile_timeout = Duration::from_secs(300); 
+    let compile_timeout = Duration::from_secs(300);
 
     // 2. 运行 LaTeXML (生成 XML)
     update_stage(
@@ -211,12 +215,13 @@ async fn run_latexml_pipeline(job: &mut JobState, store: &JobStore) -> Result<()
         "正在将 TeX 转换为 XML...",
     )
     .await;
-    let xml_output = out_dir.join("main.xml");
+    let xml_output = out_rel_to_src.join("main.xml");
 
     let mut latexml_cmd = Command::new("latexml")
         .arg("--dest")
         .arg(&xml_output)
-        .arg("--noparse") 
+        .arg("--noparse")
+        .arg("--includestyles")
         .arg(&root_tex_filename)
         .current_dir(&src_dir)
         .spawn()?;
@@ -244,7 +249,7 @@ async fn run_latexml_pipeline(job: &mut JobState, store: &JobStore) -> Result<()
     )
     .await;
 
-    let html_output = out_dir.join("main.html");
+    let html_output = out_rel_to_src.join("main.html");
 
     let status = Command::new("latexmlpost")
         .arg("--dest")

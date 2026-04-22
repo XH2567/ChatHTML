@@ -37,10 +37,18 @@ async fn main() {
 
     // 6. 组装路由（把 routes.rs 里的函数和 URL 绑定）
     let app = Router::new()
-        // 获取列表和创建任务
-        .route("/api/jobs", get(routes::list_jobs).post(routes::create_job))
-        // 获取单个详情
-        .route("/api/jobs/:id", get(routes::get_job))
+        // 获取列表，创建任务，删除任务
+        .route(
+            "/api/jobs",
+            get(routes::list_jobs)
+                .post(routes::create_job)
+                .delete(routes::delete_all_jobs),
+        )
+        // 获取单个详情和删除
+        .route(
+            "/api/jobs/:id",
+            get(routes::get_job).delete(routes::delete_job),
+        )
         // AI 聊天代理
         .route("/api/chat", post(routes::ai_chat_proxy))
         // 获取任务产物文件

@@ -93,4 +93,35 @@ impl JobStore {
             .join(sub_dir)
             .join(filename)
     }
+
+    /// 删除单个任务及其所有文件
+    pub async fn delete_job(&self, job_id: Uuid) -> Result<()> {
+        let job_dir = self.base_dir.join(job_id.to_string());
+
+        if !job_dir.exists() {
+            return Ok(());
+        }
+
+        fs::remove_dir_all(&job_dir)
+            .await
+            .with_context(|| format!("删除任务目录失败: {}", job_dir.display()))?;
+
+        Ok(())
+    }
+
+    /// 删除所有任务
+    pub async fn delete_all_jobs(&self) -> Result<()> {
+        let mut entries = fs::read_dir(&self.base_dir).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            if entry.file_type().await?.is_dir() {
+                // 尝试解析目录名为 UUID
+                if let Ok(job_id) = Uuid::parse_str(&entry.file_name().to_string_lossy()) {
+                    self.delete_job(job_id).await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }

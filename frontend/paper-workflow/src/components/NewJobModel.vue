@@ -40,10 +40,10 @@ const submit = async () => {
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-    <div class="glass-panel w-full max-w-lg rounded-[2.5rem] overflow-hidden animate-in fade-in zoom-in duration-300">
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+    <div class="bg-white w-full max-w-lg rounded-[2.5rem] overflow-hidden animate-in fade-in zoom-in duration-300 shadow-xl">
       <!-- Header -->
-      <div class="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-white/50">
+      <div class="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-white">
         <h2 class="text-2xl font-black tracking-tight">新建论文任务</h2>
         <button @click="emit('close')" class="p-2 hover:bg-slate-100 rounded-full transition-colors">
           <X :size="20" />

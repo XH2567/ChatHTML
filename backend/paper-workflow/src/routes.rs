@@ -146,3 +146,30 @@ pub async fn get_artifact(
         }
     }
 }
+
+/// 删除单个任务
+pub async fn delete_job(
+    State(state): State<Arc<AppState>>,
+    Path(job_id): Path<Uuid>,
+) -> impl IntoResponse {
+    match state.store.delete_job(job_id).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            tracing::error!("删除任务失败: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// 删除所有任务
+pub async fn delete_all_jobs(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    match state.store.delete_all_jobs().await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            tracing::error!("删除所有任务失败: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
