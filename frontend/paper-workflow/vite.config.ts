@@ -14,6 +14,11 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      // 代理 AI 聊天请求到后端
+      '/api/chat': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
       // 代理静态资源请求（CSS、图片等）
       '/artifacts': {
         target: 'http://127.0.0.1:8000/api/jobs',

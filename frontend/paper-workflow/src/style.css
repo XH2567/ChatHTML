@@ -7,6 +7,12 @@
   --color-panel: rgba(255, 255, 255, 0.85);
 }
 
+html, body {
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+  touch-action: pan-y pinch-zoom;
+}
+
 body {
   color: #0f172a; /* text-slate-900 */
   -webkit-font-smoothing: antialiased;

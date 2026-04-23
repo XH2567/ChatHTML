@@ -1,3 +1,6 @@
 # Target
 backend/paper-workflow/target/
 backend/paper-workflow/jobs/
+__pycache__/
+frontend/paper-workflow/public/artifacts/
+jobs/
