@@ -39,7 +39,7 @@ export const jobApi = {
     query: string;
     context: string;
     model: string;
-    apiKey: string;
+    api_key: string;
     full_paper: string;
   }): Promise<{ reply: string }> {
     const { data } = await api.post('/chat', payload);

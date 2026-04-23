@@ -12,17 +12,39 @@ const chatInput = ref('');
 const messages = ref<{ role: 'user' | 'bot'; content: string }[]>([]);
 const isAiLoading = ref(false);
 
-// 1. 获取论文 HTML 的 URL
-const artifactUrl = `http://127.0.0.1:8000/api/jobs/${props.jobId}/artifacts/out/main.html`;
+// 1. 获取论文 HTML URL（通过Vite代理）
+const artifactUrl = `/artifacts/${props.jobId}/out/main.html`;
 
-// 2. 划词监听逻辑
-const handleSelection = () => {
-  const selection = iframeRef.value?.contentWindow?.getSelection();
-  const text = selection?.toString().trim();
-  if (text && text.length > 5) {
+// 2. 划词监听逻辑 - 使用全局事件监听
+const handleGlobalSelection = () => {
+  console.log('handleGlobalSelection 被调用');
+  
+  // 尝试从主窗口获取选中文本
+  const selection = window.getSelection();
+  console.log('主窗口 selection 对象:', selection);
+  
+  // 如果主窗口没有选中文本，尝试从iframe获取
+  let text = selection?.toString().trim();
+  
+  if (!text && iframeRef.value?.contentWindow) {
+    try {
+      // 尝试从iframe窗口获取选中文本
+      const iframeSelection = iframeRef.value.contentWindow.getSelection();
+      text = iframeSelection?.toString().trim();
+      console.log('iframe 选中文本:', text);
+    } catch (error) {
+      console.log('无法访问iframe的selection对象（跨域限制）:', error);
+    }
+  }
+  
+  console.log('最终选中文本:', text, '长度:', text?.length);
+  if (text && text.length > 2) { // 降低长度要求，从5改为2
     selectedText.value = text;
-    // 自动打开侧边栏或显示浮动按钮（这里演示直接打开侧边栏）
+    // 自动打开侧边栏
     isSidebarOpen.value = true;
+    console.log('侧边栏已打开，选中文本:', text);
+  } else {
+    console.log('文本太短或为空，不打开侧边栏');
   }
 };
 
@@ -35,28 +57,63 @@ const askAi = async () => {
   chatInput.value = '';
   isAiLoading.value = true;
 
-  try {
-    const data = await jobApi.askAi({
-      query: userQuery,
-      context: selectedText.value,
-      model: 'gpt-4o', 
-      apiKey: localStorage.getItem('ai-api-key') || '', 
-      full_paper: iframeRef.value?.contentDocument?.body.innerText.slice(0, 50000) || ''
-    });
-    messages.value.push({ role: 'bot', content: data.reply });
-  } catch (err) {
-    messages.value.push({ role: 'bot', content: 'AI 响应失败，请检查网络或 API Key' });
-  } finally {
-    isAiLoading.value = false;
-  }
+    try {
+      const data = await jobApi.askAi({
+        query: userQuery,
+        context: selectedText.value,
+        model: localStorage.getItem('ai-model') || 'gpt-4o', 
+        api_key: localStorage.getItem('ai-api-key') || '', 
+        full_paper: iframeRef.value?.contentDocument?.body.innerText.slice(0, 50000) || ''
+      });
+      messages.value.push({ role: 'bot', content: data.reply });
+    } catch (err) {
+      messages.value.push({ role: 'bot', content: 'AI 响应失败，请检查网络或 API Key' });
+    } finally {
+      isAiLoading.value = false;
+    }
 };
 
-// 4. 注入事件监听
+// 4. 使用全局事件监听
 const onIframeLoad = () => {
-  const doc = iframeRef.value?.contentDocument;
-  if (doc) {
-    doc.addEventListener('mouseup', handleSelection);
+  console.log('iframe 加载完成');
+  
+  // 检查 iframe 是否可访问
+  if (iframeRef.value) {
+    console.log('iframe 引用存在:', iframeRef.value);
+    console.log('iframe src:', iframeRef.value.src);
+    
+    try {
+      const iframeDoc = iframeRef.value.contentDocument;
+      console.log('iframe contentDocument:', iframeDoc ? '可访问' : '不可访问（跨域限制）');
+      
+      // 尝试在 iframe 内部添加事件监听（如果跨域允许）
+      if (iframeDoc) {
+        iframeDoc.addEventListener('mouseup', handleGlobalSelection);
+        console.log('iframe 内部 mouseup 事件监听器已添加');
+        iframeDoc.addEventListener('selectionchange', handleGlobalSelection);
+        console.log('iframe 内部 selectionchange 事件监听器已添加');
+      }
+    } catch (error) {
+      console.log('iframe 访问错误（跨域）:', error);
+    }
   }
+  
+  // 在主窗口添加全局鼠标抬起事件监听
+  document.addEventListener('mouseup', handleGlobalSelection);
+  console.log('全局 mouseup 事件监听器已添加');
+  
+  // 同时添加 selectionchange 事件监听，更可靠地捕获文本选择
+  document.addEventListener('selectionchange', handleGlobalSelection);
+  console.log('全局 selectionchange 事件监听器已添加');
+  
+  // 添加点击事件监听作为备选方案
+  const handleClick = () => {
+    console.log('全局 click 事件触发');
+    // 延迟执行，确保选择已经完成
+    setTimeout(handleGlobalSelection, 100);
+  };
+  document.addEventListener('click', handleClick);
+  console.log('全局 click 事件监听器已添加');
 };
 
 onMounted(() => {
@@ -69,7 +126,8 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  iframeRef.value?.contentDocument?.removeEventListener('mouseup', handleSelection);
+  // 移除事件监听
+  document.removeEventListener('mouseup', handleGlobalSelection);
 });
 </script>
 
@@ -77,6 +135,17 @@ onUnmounted(() => {
   <div class="relative flex h-screen w-full bg-slate-50 overflow-hidden">
     <!-- 左侧：论文内容区 -->
     <div :class="['flex-1 transition-all duration-500', isSidebarOpen ? 'mr-[400px]' : 'mr-0']">
+      <!-- 手动打开侧边栏按钮 -->
+      <button 
+        @click="isSidebarOpen = !isSidebarOpen"
+        class="absolute top-4 left-4 z-10 flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 rounded-lg shadow-md hover:bg-slate-50 transition-colors"
+      >
+        <Sparkles :size="16" class="text-amber-500" />
+        <span class="text-sm font-medium text-slate-700">
+          {{ isSidebarOpen ? '关闭' : '打开' }} AI 助手
+        </span>
+      </button>
+      
       <iframe 
         ref="iframeRef"
         :src="artifactUrl"

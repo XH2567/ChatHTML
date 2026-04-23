@@ -4,11 +4,13 @@ import { jobApi } from '../api/client';
 import type { JobState } from '../types/api';
 import JobCard from '../components/JobCard.vue';
 import NewJobModal from '../components/NewJobModel.vue';
-import { Plus, RefreshCw, Trash2 } from 'lucide-vue-next';
+import SettingsModal from '../components/SettingsModal.vue';
+import { Plus, RefreshCw, Trash2, Settings } from 'lucide-vue-next';
 
 const jobs = ref<JobState[]>([]);
 const isRefreshing = ref(false);
 const isModalOpen = ref(false);
+const isSettingsOpen = ref(false);
 
 const refresh = async () => {
   isRefreshing.value = true;
@@ -76,6 +78,9 @@ onMounted(refresh);
         <button @click="deleteAllJobs" class="p-4 glass-card rounded-2xl text-slate-600 hover:text-rose-600 transition-colors">
           <Trash2 :size="20" />
         </button>
+        <button @click="isSettingsOpen = true" class="p-4 glass-card rounded-2xl text-slate-600 hover:text-blue-600 transition-colors">
+          <Settings :size="20" />
+        </button>
         <button @click="isModalOpen = true" 
           class="flex items-center gap-2 px-6 py-4 bg-amber-600 hover:bg-amber-700 text-white rounded-2xl font-bold shadow-lg shadow-amber-200 transition-all">
           <Plus :size="20" />
@@ -98,6 +103,12 @@ onMounted(refresh);
       v-if="isModalOpen" 
       @close="isModalOpen = false" 
       @success="onJobCreated" 
+    />
+    <SettingsModal 
+      v-if="isSettingsOpen" 
+      :isOpen="isSettingsOpen"
+      @close="isSettingsOpen = false"
+      @saved="refresh"
     />
   </div>
 </template>
