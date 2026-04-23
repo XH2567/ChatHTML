@@ -23,7 +23,7 @@ impl JobStore {
         let job_dir = self.base_dir.join(job.job_id.to_string());
 
         // 创建目录结构
-        let dirs = ["original", "src", "normalized", "out", "meta", "logs"];
+        let dirs = ["original", "src", "normalized", "out", "meta", "log"];
         for dir in dirs {
             fs::create_dir_all(job_dir.join(dir))
                 .await
@@ -92,6 +92,11 @@ impl JobStore {
             .join(job_id.to_string())
             .join(sub_dir)
             .join(filename)
+    }
+
+    /// 获取任务根目录的物理路径
+    pub fn get_job_path(&self, job_id: Uuid) -> PathBuf {
+        self.base_dir.join(job_id.to_string())
     }
 
     /// 删除单个任务及其所有文件

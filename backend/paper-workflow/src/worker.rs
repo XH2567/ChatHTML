@@ -6,7 +6,7 @@ use pathdiff::diff_paths;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tar::Archive;
-use tokio::fs;
+use tokio::fs::{self, File};
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
@@ -182,92 +182,139 @@ async fn find_root_tex(src_dir: &Path) -> Result<PathBuf> {
     Err(anyhow!("未能在源码中找到主 .tex 文件"))
 }
 
+async fn run_step_with_timeout(
+    name: &str,
+    args: &[&str],
+    cwd: &Path,
+    log_path: &Path,
+    limit: Duration,
+) -> bool {
+    // 准备日志文件
+    let log_file = match File::create(log_path).await {
+        Ok(f) => f.into_std().await,
+        Err(_) => return false,
+    };
+
+    let mut cmd = Command::new(name);
+    cmd.args(args)
+        .current_dir(cwd)
+        .stdout(log_file.try_clone().unwrap())
+        .stderr(log_file);
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    // 使用 tokio 的 timeout 包装 wait()
+    match timeout(limit, child.wait()).await {
+        Ok(Ok(status)) => status.success(),
+        Ok(Err(_)) => false,
+        Err(_) => {
+            // 超时了，强行杀死子进程
+            let _ = child.kill().await;
+            tracing::error!("步骤 {} 执行超时 ({:?})，已终止", name, limit);
+            false
+        }
+    }
+}
+
 async fn run_latexml_pipeline(job: &mut JobState, store: &JobStore) -> Result<()> {
+    let job_dir = store.get_job_path(job.job_id);
     let src_dir = store.get_job_file_path(job.job_id, "src", "");
     let out_dir = store.get_job_file_path(job.job_id, "out", "");
-    let out_rel_to_src =
-        diff_paths(&out_dir, &src_dir).ok_or_else(|| anyhow!("无法计算相对路径"))?;
 
-    // 1. 识别主文件
-    update_stage(
-        job,
-        "解析结构",
-        StageStatus::Running,
-        "正在识别主 LaTeX 文件...",
-    )
-    .await;
+    let log_dir = job_dir.join("log");
+    let overlay_dir = job_dir.join("overlay");
+    tokio::fs::create_dir_all(&log_dir).await?;
+    tokio::fs::create_dir_all(&overlay_dir).await?;
+
+    let rel_overlay_dir =
+        diff_paths(&overlay_dir, &src_dir).ok_or_else(|| anyhow!("无法计算相对路径"))?;
+
+    // 识别主文件
     let root_tex_path = find_root_tex(&src_dir).await?;
-    let root_tex_filename = root_tex_path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| anyhow!("非法的文件名"))?;
+    let root_stem = root_tex_path.file_stem().unwrap().to_str().unwrap();
+    let root_name = root_tex_path.file_name().unwrap().to_str().unwrap();
 
-    job.status = JobStatus::Processing;
-    store.save_job(job).await?;
-
-    let compile_timeout = Duration::from_secs(300);
-
-    // 2. 运行 LaTeXML (生成 XML)
-    update_stage(
-        job,
-        "LaTeXML 编译",
-        StageStatus::Running,
-        "正在将 TeX 转换为 XML...",
+    // 使用pdfLatex进行预编译
+    update_stage(job, "预编译", StageStatus::Running, "生成辅助文件...").await;
+    run_step_with_timeout(
+        "pdflatex",
+        &["-interaction=nonstopmode", "-draftmode", root_name],
+        &src_dir,
+        &log_dir.join("preflight.log"),
+        Duration::from_secs(60),
     )
     .await;
-    let xml_output = out_rel_to_src.join("main.xml");
 
-    let mut latexml_cmd = Command::new("latexml")
-        .arg("--dest")
-        .arg(&xml_output)
-        .arg("--noparse")
-        .arg("--includestyles")
-        .arg(&root_tex_filename)
-        .current_dir(&src_dir)
-        .spawn()?;
-
-    match timeout(compile_timeout, latexml_cmd.wait()).await {
-        Ok(Ok(status)) if status.success() => {
-            tracing::info!("XML 生成成功");
-        }
-        Ok(_) => {
-            let _ = latexml_cmd.kill().await;
-            return Err(anyhow!("LaTeXML 编译失败，请检查 LaTeX 语法或宏包依赖"));
-        }
-        Err(_) => {
-            let _ = latexml_cmd.kill().await;
-            return Err(anyhow!("LaTeXML 编译超时，任务已自动终止"));
+    // 注入.bib，处理参考文献
+    let bbl_path = src_dir.join(format!("{}.bbl", root_stem));
+    let mut target_tex = root_name.to_string();
+    if bbl_path.exists() {
+        if let Ok(content) = tokio::fs::read_to_string(&root_tex_path).await {
+            if content.contains("\\bibliography") {
+                let patched_name = format!("{}.latexml.tex", root_stem);
+                let patched_content =
+                    content.replace("\\bibliography", &format!("\\input{{{}.bbl}} %", root_stem));
+                tokio::fs::write(src_dir.join(&patched_name), patched_content).await?;
+                target_tex = patched_name;
+            }
         }
     }
 
-    // 3. 运行 LaTeXMLPost (生成 HTML)
-    update_stage(
-        job,
-        "HTML 生成",
-        StageStatus::Running,
-        "正在渲染最终网页...",
+    // 创建伪装定义，处理不兼容宏包
+    let shim = "package LaTeXML::Package::Pool; use LaTeXML::Package; DefMacro('\\tcbuselibrary{}', ''); 1;";
+    tokio::fs::write(overlay_dir.join("tcolorbox.sty.ltxml"), shim).await?;
+
+    // 运行 LaTeXML (生成 XML)
+    update_stage(job, "LaTeXML", StageStatus::Running, "正在执行编译...").await;
+    let xml_path = out_dir.join("main.xml");
+    let rel_xml_path =
+        diff_paths(&xml_path, &src_dir).ok_or_else(|| anyhow!("无法计算相对路径"))?;
+    let latexml_success = run_step_with_timeout(
+        "latexml",
+        &[
+            &format!("--destination={}", rel_xml_path.display()),
+            &format!("--path={}", rel_overlay_dir.display()), // 引入补丁路径
+            "--includestyles",
+            &target_tex,
+        ],
+        &src_dir,
+        &log_dir.join("latexml.log"),
+        Duration::from_secs(300),
     )
     .await;
 
-    let html_output = out_rel_to_src.join("main.html");
+    if !latexml_success {
+        return Err(anyhow!("LaTeXML 编译失败，请检查日志"));
+    }
 
-    let status = Command::new("latexmlpost")
-        .arg("--dest")
-        .arg(&html_output)
-        .arg(&xml_output)
-        .current_dir(&src_dir)
-        .status()
-        .await?;
+    // 运行 LaTeXMLPost (生成 HTML)
+    update_stage(job, "HTML生成", StageStatus::Running, "正在生成网页...").await;
+    let html_path = out_dir.join("main.html");
+    let rel_html_path =
+        diff_paths(&html_path, &src_dir).ok_or_else(|| anyhow!("无法计算相对路径"))?;
+    let post_success = run_step_with_timeout(
+        "latexmlpost",
+        &[
+            &format!("--destination={}", rel_html_path.display()),
+            "--format=html5",
+            &format!("--path={}", rel_overlay_dir.display()),
+            rel_xml_path.to_str().unwrap(),
+        ],
+        &src_dir,
+        &log_dir.join("latexmlpost.log"),
+        Duration::from_secs(120),
+    )
+    .await;
 
-    if status.success() {
-        job.artifacts
-            .insert("html".to_string(), "out/main.html".to_string());
-        job.artifacts
-            .insert("xml".to_string(), "out/main.xml".to_string());
-        update_stage(job, "HTML 生成", StageStatus::Done, "转换成功").await;
+    if post_success {
+        job.artifacts.insert("html".into(), "out/main.html".into());
+        job.artifacts.insert("xml".into(), "out/main.xml".into());
+        update_stage(job, "完成", StageStatus::Done, "转换成功").await;
+        Ok(())
     } else {
-        return Err(anyhow!("LaTeXMLPost 执行失败"));
+        Err(anyhow!("LaTeXMLPost 渲染失败"))
     }
-
-    Ok(())
 }
