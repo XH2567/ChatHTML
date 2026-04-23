@@ -1,95 +1,172 @@
-# arXiv Paper Workflow & AI Reader
+# ChatHTML
 
-这是一个集成了 LaTeXML 编译与 AI 辅助阅读功能的学术论文 Web 应用。
-它能够将 arXiv 上的 LaTeX 源码一键下载并编译为现代、可读性强的 HTML 页面，并在页面中原生注入了浮动的“AI 对话侧边栏”（支持划词提问、Markdown 格式渲染、多种大模型接入、历史对话本地持久化）。
+> **ChatHTML** 是一个将学术论文（LaTeX 源码）自动转换为交互式 HTML 的 Web 应用，内置基于 DeepSeek API 的学术 AI 助手，支持划词提问。
 
-## 环境依赖与安装
+## 核心功能
 
-### 1. 安装 LaTeXML
-本项目依赖 `latexml` 工具链将 LaTeX 编译为 HTML/XML。
-你可以通过操作系统的包管理器进行安装：
+| 功能 | 说明 |
+|------|------|
+| **论文源码 → HTML** | 支持上传 `.tar.gz` 压缩包或直接输入 arXiv ID，后端自动下载、解压、通过 LaTeXML 编译为 HTML |
+| **交互式阅读** | 使用 `<iframe>` 嵌入生成的 HTML 论文，提供沉浸式阅读体验 |
+| **划词 AI 助手** | 选中论文中的文本，自动弹出侧边栏，调用 DeepSeek API 进行问答 |
+| **任务管理** | 创建、查看、删除论文转换任务，实时轮询进度 |
 
-**Ubuntu / Debian:**
-```bash
-sudo apt-get update
-sudo apt-get install latexml
-```
+## 技术栈
 
-**macOS:**
-```bash
-brew install latexml
-```
+| 层 | 技术 | 说明 |
+|----|------|------|
+| 后端框架 | **Axum** (Rust) | 高性能异步 Web 框架 |
+| 后端运行时 | **Tokio** | 异步运行时 |
+| 序列化 | **Serde** | JSON 序列化/反序列化 |
+| 持久化 | **文件系统** | 每个任务一个目录，状态存为 `meta/job.json` |
+| 前端框架 | **Vue 3** (Composition API + `<script setup>`) | 响应式 UI |
+| 构建工具 | **Vite** | 开发服务器与生产构建 |
+| 样式 | **Tailwind CSS 4** | 原子化 CSS |
+| AI API | **DeepSeek Chat API** | 学术问答 |
 
-### 2. 启动 Web 应用
-本项目后端非常轻量，无外部第三方 Python 包依赖（完全基于 Python 内置库）。
-确保你已安装 Python 3.10+，执行以下命令即可启动：
+## 环境要求
 
-```bash
-# 进入 webapp 目录
-cd ChatHTML
-# 启动 HTTP 服务器
-python3 app.py
-```
-启动成功后，在浏览器访问：`http://127.0.0.1:8000`
+### 必需依赖
 
-### 3. 公网分享 (基于 Cloudflare 免费隧道)
+| 依赖 | 版本要求 | 安装命令 (Ubuntu/Debian) |
+|------|----------|--------------------------|
+| **Rust** | 2024 edition | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| **Node.js** | ≥ 18 (推荐 LTS) | `apt install nodejs npm` 或使用 nvm |
+| **LaTeXML** | 最新 | `apt install latexml` |
+| **pdfTeX** (texlive) | 最新 | `apt install texlive-pdflatex texlive-latex-extra texlive-latex-recommended texlive-science` |
+| **BibTeX 工具** | 可选 | `apt install texlive-bibtex-extra` |
+| **构建工具** | — | `apt install build-essential pkg-config libssl-dev` |
 
-首先安装 `cloudflared` 命令行工具：
-
-**Ubuntu / Debian:**
-```bash
-curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-sudo dpkg -i cloudflared.deb
-```
-或
-```bash
-# 1) 导入 Cloudflare APT GPG key
-curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
-  | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
-
-# 2) 添加 cloudflared 软件源
-echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" \
-  | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
-
-# 3) 安装 cloudflared
-sudo apt update
-sudo apt install -y cloudflared
-
-# 4) 验证安装
-cloudflared --version
-```
-
-**macOS:**
-```bash
-brew install cloudflared
-```
-
-然后启动内网穿透：
+### 验证安装
 
 ```bash
-cloudflared tunnel --url http://127.0.0.1:8000
+# 验证 Rust
+rustc --version && cargo --version
+
+# 验证 Node.js
+node --version && npm --version
+
+# 验证 LaTeXML
+latexml --version && latexmlpost --version
+
+# 验证 pdfTeX
+pdflatex --version
 ```
-运行后，终端会输出一个类似 `https://xxxx.trycloudflare.com` 的公网链接。
 
----
+## 快速开始
 
-## 核心模块结构说明
+### 1. 启动后端
 
-为了方便二次开发和多人协作，核心逻辑已按功能单一原则进行了模块化拆分：
+```bash
+cd backend/paper-workflow
+cargo run
+```
 
-- `app.py`: 应用启动入口，包含基础 `HTTP Server` 的启动机制机制和所有的路由分发逻辑（`/jobs`、`/api/chat` 等）。
-- `models.py`: 数据模型层，存放全局常量配置（目录、尺寸限制）和核心数据的结构映射（如 `JobState` 任务状态类）。
-- `store.py`: 数据持久层，内部封装了基于本地 JSON 文件的状态增删改查方法，用于维持不同任务的流程状态。
-- `worker.py`: 异步工作与预处理层，负责拉取 arXiv 源码压缩包、安全检查、防炸弹解压，以及启动后台编译线程。
-- `views.py`: 视图渲染与注入层。负责：
-  - 各类 HTML 路由页面的模板拼接（主页、任务详情页）。
-  - LaTeXML 编译出 HTML 后的后处理（修复 `\cellcolor` 等不支持的 LaTeX 伪像）。
-  - 核心功能：向 HTML 后期注入精美的 **流式排版 CSS 主题** 与 **AI 助手侧边栏** 的 JS 交互逻辑。
-- `workflow.py`（如有）: 控制底层调用 `latexml` 和 `latexmlpost` 子进程的具体编译工作流。
+后端将在 `http://127.0.0.1:8000` 启动，`jobs/` 目录自动创建。
 
-## 工作区目录
-服务运行后会在当前目录下自动生成 `jobs/` 核心工作缓存区，目录规范如下：
-- `jobs/<job_id>/original/`: 原始源文件压缩包
-- `jobs/<job_id>/src/`: 安全解压后的源码目录
-- `jobs/<job_id>/out/`: 编译产出的 HTML 文件、拆分的 XML 及图片静态资源
-- `jobs/<job_id>/meta/`: 任务执行期的配置文件（JSON）
+### 2. 启动前端（新开一个终端）
+
+```bash
+cd frontend/paper-workflow
+npm install
+npm run dev
+```
+
+前端将在 `http://localhost:5173` 启动，Vite 代理自动转发 API 请求到后端。
+
+### 3. 使用
+
+1. 打开浏览器访问 `http://localhost:5173`
+2. 点击 **新建任务**，输入 arXiv ID（如 `2401.12345`）或上传 `.tar.gz` 文件
+3. 等待任务处理完成（可看到实时状态变化）
+4. 点击任务卡片进入阅读页
+5. 在 **设置** 中配置 DeepSeek API Key
+6. 选中论文中的文本，通过 AI 助手提问
+
+## 项目结构
+
+```
+ChatHTML/
+├── README.md                     # 本文件
+├── API_SPEC.md                   # API 接口说明文档
+├── manual.md                     # 详细技术手册
+├── backend/
+│   └── paper-workflow/           # Rust 后端项目
+│       ├── Cargo.toml
+│       └── src/
+│           ├── main.rs           # 入口：启动服务器
+│           ├── models.rs         # 数据模型定义
+│           ├── routes.rs         # API 路由处理函数
+│           ├── store.rs          # 持久化存储层
+│           └── worker.rs         # 后台任务处理流水线
+├── frontend/
+│   └── paper-workflow/           # Vue 3 前端项目
+│       ├── package.json
+│       ├── vite.config.ts
+│       └── src/
+│           ├── main.ts           # Vue 应用挂载
+│           ├── App.vue           # 根组件
+│           ├── router.ts         # 路由定义
+│           ├── style.css         # 全局样式 + Tailwind
+│           ├── api/client.ts     # Axios API 客户端
+│           ├── types/api.ts      # TypeScript 类型定义
+│           ├── views/
+│           │   ├── HomeView.vue      # 首页
+│           │   └── ReaderView.vue    # 阅读页
+│           └── components/
+│               ├── JobCard.vue       # 任务卡片
+│               ├── NewJobModel.vue   # 新建任务弹窗
+│               ├── PaperReader.vue   # 论文阅读器（核心组件）
+│               └── SettingsModal.vue # AI 设置弹窗
+└── jobs/                          # （运行时生成）任务数据存储目录
+```
+
+## 处理流程
+
+```
+用户提交 arXiv ID 或上传文件
+        │
+        ▼
+  ┌─ 创建任务 ──────────────────────┐
+  │  • 生成 UUID                    │
+  │  • 创建目录结构                 │
+  │  • 保存初始状态                 │
+  └────────────────────────────────┘
+        │
+        ▼
+  ┌─ 获取并解压源码 ────────────────┐
+  │  • arXiv 模式：从 arxiv.org 下载 │
+  │  • Upload 模式：使用上传文件     │
+  │  • 安全解压到 src/ 目录          │
+  └────────────────────────────────┘
+        │
+        ▼
+  ┌─ LaTeXML 编译 ─────────────────┐
+  │  • pdflatex -draftmode 预编译   │
+  │  • 注入 .bbl 参考文献           │
+  │  • latexml → main.xml           │
+  │  • latexmlpost → main.html      │
+  └────────────────────────────────┘
+        │
+        ▼
+  用户可交互阅读 + AI 划词问答
+```
+
+## API 概览
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/jobs` | 获取任务列表 |
+| POST | `/api/jobs` | 创建任务（上传/arXiv） |
+| DELETE | `/api/jobs` | 删除所有任务 |
+| GET | `/api/jobs/:id` | 获取单个任务详情 |
+| DELETE | `/api/jobs/:id` | 删除单个任务 |
+| POST | `/api/chat` | AI 聊天代理 |
+| GET | `/api/jobs/:id/artifacts/*path` | 获取产物文件 |
+| GET | `/api/jobs/:id/html` | 获取 HTML 内容 |
+
+> 详细 API 文档参见 [API_SPEC.md](./API_SPEC.md)，完整技术手册参见 [manual.md](./manual.md)。
+
+## License
+
+MIT

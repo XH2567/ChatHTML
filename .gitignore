@@ -1,4 +1,6 @@
-jobs/
+# Target
+backend/paper-workflow/target/
+backend/paper-workflow/jobs/
 __pycache__/
-*.log
-*.pyc
+frontend/paper-workflow/public/artifacts/
+jobs/
