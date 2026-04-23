@@ -7,29 +7,56 @@
 
 ## 目录
 
-1. [项目概述](#1-项目概述)
-2. [项目结构](#2-项目结构)
-3. [后端详解](#3-后端详解)
-   - 3.1 [入口文件 —— main.rs](#31-入口文件--mainrs)
-   - 3.2 [数据模型 —— models.rs](#32-数据模型--modelsrs)
-   - 3.3 [API 路由 —— routes.rs](#33-api-路由--routesrs)
-   - 3.4 [持久化存储 —— store.rs](#34-持久化存储--storers)
-   - 3.5 [后台任务 —— worker.rs](#35-后台任务--workerrs)
-4. [前端详解](#4-前端详解)
-   - 4.1 [入口与配置 —— main.ts / App.vue / vite.config.ts](#41-入口与配置)
-   - 4.2 [路由 —— router.ts](#42-路由--routerts)
-   - 4.3 [TypeScript 类型 —— api.ts](#43-typescript-类型--apits)
-   - 4.4 [API 客户端 —— client.ts](#44-api-客户端--clientts)
-   - 4.5 [全局样式 —— style.css](#45-全局样式--stylecss)
-   - 4.6 [主页 —— HomeView.vue](#46-主页--homeviewvue)
-   - 4.7 [阅读页 —— ReaderView.vue](#47-阅读页--readerviewvue)
-   - 4.8 [任务卡片 —— JobCard.vue](#48-任务卡片--jobcardvue)
-   - 4.9 [新建任务弹窗 —— NewJobModel.vue](#49-新建任务弹窗--newjobmodelvue)
-   - 4.10 [论文阅读器 —— PaperReader.vue](#410-论文阅读器--paperreadervue)
-   - 4.11 [AI 设置弹窗 —— SettingsModal.vue](#411-ai-设置弹窗--settingsmodalvue)
-5. [数据流与工作流程](#5-数据流与工作流程)
-6. [部署与运行](#6-部署与运行)
-7. [常见问题与扩展](#7-常见问题与扩展)
+- [ChatHTML 项目技术手册](#chathtml-项目技术手册)
+  - [目录](#目录)
+  - [1. 项目概述](#1-项目概述)
+    - [核心能力](#核心能力)
+    - [技术栈](#技术栈)
+  - [2. 项目结构](#2-项目结构)
+  - [3. 后端详解](#3-后端详解)
+    - [3.1 入口文件 —— `main.rs`](#31-入口文件--mainrs)
+    - [3.2 数据模型 —— `models.rs`](#32-数据模型--modelsrs)
+      - [`JobStatus` —— 任务状态枚举](#jobstatus--任务状态枚举)
+      - [`StageStatus` 与 `StageDetail`](#stagestatus-与-stagedetail)
+      - [`SourceMode` —— 来源模式](#sourcemode--来源模式)
+      - [`JobState` —— 核心任务状态](#jobstate--核心任务状态)
+    - [3.3 API 路由 —— `routes.rs`](#33-api-路由--routesrs)
+      - [3.3.1 共享状态](#331-共享状态)
+      - [3.3.2 获取任务列表 (`list_jobs`)](#332-获取任务列表-list_jobs)
+      - [3.3.3 获取单个任务 (`get_job`)](#333-获取单个任务-get_job)
+      - [3.3.4 创建任务 (`create_job`)](#334-创建任务-create_job)
+      - [3.3.5 AI 聊天代理 (`ai_chat_proxy`)](#335-ai-聊天代理-ai_chat_proxy)
+      - [3.3.6 删除任务 (`delete_job` / `delete_all_jobs`)](#336-删除任务-delete_job--delete_all_jobs)
+      - [3.3.7 获取产物文件 (`get_artifact`)](#337-获取产物文件-get_artifact)
+      - [3.3.8 获取 HTML 内容 (`get_html_content`)](#338-获取-html-内容-get_html_content)
+    - [3.4 持久化存储 —— `store.rs`](#34-持久化存储--storers)
+      - [目录结构](#目录结构)
+      - [核心方法](#核心方法)
+    - [3.5 后台任务 —— `worker.rs`](#35-后台任务--workerrs)
+      - [整体流程](#整体流程)
+      - [详细说明](#详细说明)
+  - [4. 前端详解](#4-前端详解)
+    - [4.1 入口与配置](#41-入口与配置)
+      - [`main.ts` —— 应用入口](#maints--应用入口)
+      - [`App.vue` —— 根组件](#appvue--根组件)
+      - [`vite.config.ts` —— 构建配置](#viteconfigts--构建配置)
+    - [4.2 路由 —— `router.ts`](#42-路由--routerts)
+    - [4.3 TypeScript 类型 —— `api.ts`](#43-typescript-类型--apits)
+    - [4.4 API 客户端 —— `client.ts`](#44-api-客户端--clientts)
+    - [4.5 全局样式 —— `style.css`](#45-全局样式--stylecss)
+    - [4.6 主页 —— `HomeView.vue`](#46-主页--homeviewvue)
+    - [4.7 阅读页 —— `ReaderView.vue`](#47-阅读页--readerviewvue)
+    - [4.8 任务卡片 —— `JobCard.vue`](#48-任务卡片--jobcardvue)
+    - [4.9 新建任务弹窗 —— `NewJobModel.vue`](#49-新建任务弹窗--newjobmodelvue)
+    - [4.10 论文阅读器 —— `PaperReader.vue`](#410-论文阅读器--paperreadervue)
+      - [关键技术点](#关键技术点)
+    - [4.11 AI 设置弹窗 —— `SettingsModal.vue`](#411-ai-设置弹窗--settingsmodalvue)
+  - [5. 数据流与工作流程](#5-数据流与工作流程)
+    - [5.1 创建任务 → 完成阅读](#51-创建任务--完成阅读)
+    - [5.2 数据持久化](#52-数据持久化)
+  - [6. 部署与运行](#6-部署与运行)
+    - [6.1 环境要求](#61-环境要求)
+    - [6.2 运行方式](#62-运行方式)
 
 ---
 
@@ -752,39 +779,39 @@ iframeDoc.head.appendChild(style);
 用户操作               前端                   后端                          文件系统/外部
 ─────────           ────────              ────────                       ──────────────
 1. 填写 arXiv ID      │                      │                              │
-   或上传文件          │                      │                              │
+   或上传文件         │                      │                              │
                       │  POST /api/jobs      │                              │
-2. 点击提交 ────────→  │  (FormData)          │                              │
-                      │  ──────────────────→  │  3. 创建 JobState            │
+2. 点击提交 ────────→ │  (FormData)          │                              │
+                      │  ──────────────────→ │  3. 创建 JobState            │
                       │                      │  ├─ 生成 UUID                │
                       │                      │  ├─ 创建目录结构             │ ──→ jobs/{uuid}/
                       │                      │  ├─ 保存 job.json            │ ──→ meta/job.json
                       │                      │  └─ 保存上传文件             │ ──→ original/
                       │                      │                              │
                       │  201 + JobState      │  4. tokio::spawn(worker)     │
-                      │  ←──────────────────  │      │                      │
-                      │                      │      │                      │
-                      │  跳转 ReaderView      │      ▼                      │
-5. 显示"处理中" ──────→  每 3 秒轮询           │  5. ArXiv 下载 / 解压        │
-                      │  GET /api/jobs/:id    │  ├─ download_from_arxiv()   │ ──→ https://arxiv.org
-                      │  ──────────────────→  │  ├─ execute_extraction()    │ ──→ src/
-                      │  ←── JobState ───────  │  └─ save_job()             │
+                      │  ←────────────────── │      │                       │
+                      │                      │      │                       │
+                      │  跳转 ReaderView     │      ▼                       │                 
+5. 显示"处理中" ─────→|  每 3 秒轮询          │  5. ArXiv 下载 / 解压        │
+                      │  GET /api/jobs/:id   │  ├─ download_from_arxiv()    │ ──→ https://arxiv.org
+                      │  ─────────────────→  │  ├─ execute_extraction()     │ ──→ src/
+                      │  ←── JobState ─────  │  └─ save_job()               │
                       │                      │                              │
-                      │                      │  6. LaTeXML 编译            │
+                      │                      │  6. LaTeXML 编译             │
                       │                      │  ├─ pdflatex -draftmode      │ ──→ 生成 .aux/.bbl
                       │                      │  ├─ latexml → main.xml       │ ──→ out/main.xml
-                      │                      │  ├─ latexmlpost → main.html   │ ──→ out/main.html
+                      │                      │  ├─ latexmlpost → main.html  │ ──→ out/main.html
                       │                      │  └─ save_job(Completed)      │
                       │                      │                              │
-6. 状态变为 completed   │  ←── JobState ───────  │                              │
-   ────────────────→   │  停止轮询             │                              │
+6. 状态变为 completed │  ←── JobState ─────   │                              │
+   ───────────────→   │  停止轮询             │                              │
                       │  加载 PaperReader     │                              │
-7. 阅读论文 ─────────→  │  iframe: /artifacts/.. │  GET .../artifacts/...     │
+7. 阅读论文 ───────→  │ iframe: /artifacts/.. │  GET .../artifacts/...       │
                       │  ──────────────────→  │  ──→ 读取 out/main.html ──── │
-                      │                      │                              │
-8. 划选文本提问 ─────→  │  POST /api/chat      │                              │
+                      │                       │                              │
+8. 划选文本提问 ─ ──→  │  POST /api/chat      │                              │
                       │  ──────────────────→  │  ──→ DeepSeek API ────────── │
-                      │  ←── AI 回复 ────────  │                              │
+                      │  ←── AI 回复 ───────  │                              │
 ```
 
 ### 5.2 数据持久化
@@ -854,38 +881,6 @@ npm run dev
 4. 点击任务卡片进入阅读页
 5. 在设置中配置 DeepSeek API Key
 6. 选中论文中的文本，通过 AI 助手提问
-
----
-
-## 7. 常见问题与扩展
-
-### Q1: 论文转换失败怎么办？
-
-查看对应任务的日志文件（`jobs/{uuid}/log/` 目录下）：
-- `preflight.log` — pdfLaTeX 预编译问题
-- `latexml.log` — LaTeXML 转换错误
-- `latexmlpost.log` — HTML 渲染问题
-
-常见原因：缺少宏包、LaTeX 语法错误、超大文件超时。
-
-### Q2: 如何支持更多 AI 模型？
-
-修改 `routes.rs` 中的 `call_ai_api` 函数，根据 `req.model` 参数路由到不同的 API 端点。目前仅支持 DeepSeek。
-
-### Q3: 如何扩展新的处理阶段？
-
-1. 在 `models.rs` 中更新 `JobStatus` 枚举
-2. 在 `worker.rs` 中添加新的处理函数
-3. 在 `process_job` 中串联新阶段
-4. 在前端 `api.ts` 的 `JobStatus` 类型中添加对应值
-
-### Q4: 前端跨域问题？
-
-开发环境通过 Vite 代理解决。生产环境应使用 nginx 反向代理或配置后端 CORS。
-
-### Q5: 如何清理任务数据？
-
-直接删除 `jobs/` 目录下的对应 UUID 文件夹即可，或在首页使用"删除所有任务"功能。
 
 ---
 
