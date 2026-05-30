@@ -31,13 +31,14 @@
 | 依赖 | 版本要求 | 安装命令 (Ubuntu/Debian) |
 |------|----------|--------------------------|
 | **Rust** | 2024 edition | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
-| **Node.js** | ≥ 18 (推荐 LTS) | `apt install nodejs npm` 或使用 nvm |
-| **LaTeXML** | 最新 | `apt install latexml` |
-| **pdfTeX** (texlive) | 最新 | `apt install texlive-pdflatex texlive-latex-extra texlive-latex-recommended texlive-science` |
-| **BibTeX 工具** | 可选 | `apt install texlive-bibtex-extra` |
-| **构建工具** | — | `apt install build-essential pkg-config libssl-dev` |
+| **Node.js** | ≥ 18 (推荐 LTS) | `sudo apt install nodejs npm` 或使用 nvm |
+| **LaTeXML** | 最新 | `sudo apt install latexml` |
+| **pdfTeX** (texlive) | 最新 | `sudo apt install texlive-latex-base texlive-latex-extra texlive-latex-recommended texlive-science` |
+| **BibTeX 工具** | 可选 | `sudo apt install texlive-bibtex-extra` |
+| **构建工具** | — | `sudo apt install build-essential pkg-config libssl-dev` |
 
 ### 验证安装
+安装完成之后重启终端
 
 ```bash
 # 验证 Rust
@@ -47,7 +48,7 @@ rustc --version && cargo --version
 node --version && npm --version
 
 # 验证 LaTeXML
-latexml --version && latexmlpost --version
+latexml --VERSION && latexmlpost --VERSION
 
 # 验证 pdfTeX
 pdflatex --version
