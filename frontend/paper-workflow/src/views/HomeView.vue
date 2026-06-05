@@ -2,6 +2,7 @@
 import { ref, onMounted, watch } from 'vue';
 import { jobApi } from '../api/client';
 import type { JobState } from '../types/api';
+import draggable from 'vuedraggable';
 import JobCard from '../components/JobCard.vue';
 import NewJobModal from '../components/NewJobModel.vue';
 import SettingsModal from '../components/SettingsModal.vue';
@@ -17,6 +18,10 @@ const isModalOpen = ref(false);
 const isAuthOpen = ref(false);
 const isApiKeyOpen = ref(false);
 
+const isDragging = ref(false);
+const draggingJobId = ref<string | null>(null);
+const isOverDelete = ref(false);
+
 const refresh = async () => {
   isRefreshing.value = true;
   try {
@@ -30,15 +35,6 @@ const onJobCreated = (newJob: JobState) => {
   jobs.value.unshift(newJob);
 };
 
-const deleteJob = async (jobId: string) => {
-  try {
-    await jobApi.deleteJob(jobId);
-    jobs.value = jobs.value.filter(job => job.jobId !== jobId);
-  } catch (error) {
-    console.error('删除任务失败:', error);
-  }
-};
-
 const deleteAllJobs = async () => {
   if (!confirm('确定要删除所有任务吗？此操作不可撤销。')) {
     return;
@@ -49,6 +45,60 @@ const deleteAllJobs = async () => {
   } catch (error) {
     console.error('删除所有任务失败:', error);
   }
+};
+
+const onStart = (e: any) => {
+  isDragging.value = true;
+  draggingJobId.value = jobs.value[e.oldIndex]?.jobId;
+  document.addEventListener('pointermove', onPointerMove);
+  document.body.style.userSelect = 'none';
+};
+
+const onPointerMove = (e: PointerEvent) => {
+  const deleteZone = document.querySelector('.delete-zone');
+  if (!deleteZone) return;
+  const rect = deleteZone.getBoundingClientRect();
+  isOverDelete.value = (
+    e.clientX >= rect.left && e.clientX <= rect.right &&
+    e.clientY >= rect.top && e.clientY <= rect.bottom
+  );
+};
+
+const onEnd = async (e: any) => {
+  document.removeEventListener('pointermove', onPointerMove);
+  document.body.style.userSelect = '';
+  isDragging.value = false;
+  isOverDelete.value = false;
+
+  const deleteZone = document.querySelector('.delete-zone');
+  if (deleteZone && draggingJobId.value) {
+    const rect = deleteZone.getBoundingClientRect();
+    const ev = e.originalEvent;
+    const clientX = ev.clientX ?? ev.changedTouches?.[0]?.clientX;
+    const clientY = ev.clientY ?? ev.changedTouches?.[0]?.clientY;
+
+    if (
+      clientX !== undefined && clientY !== undefined &&
+      clientX >= rect.left && clientX <= rect.right &&
+      clientY >= rect.top && clientY <= rect.bottom
+    ) {
+      if (!confirm('确定要删除这个任务吗？')) {
+        draggingJobId.value = null;
+        return;
+      }
+      try {
+        await jobApi.deleteJob(draggingJobId.value);
+        jobs.value = jobs.value.filter(j => j.jobId !== draggingJobId.value);
+      } catch (error) {
+        console.error('删除任务失败:', error);
+      }
+      draggingJobId.value = null;
+      return;
+    }
+  }
+
+  draggingJobId.value = null;
+  jobApi.reorderJobs(jobs.value.map(j => j.jobId));
 };
 
 const openAuthModal = () => {
@@ -130,10 +180,45 @@ onMounted(() => {
       <div v-else-if="jobs.length === 0" class="text-center py-24 glass-card rounded-[3rem] border-dashed">
         <p class="text-slate-400 font-medium">还没有任务，开始提交你的第一篇论文吧。</p>
       </div>
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <JobCard v-for="job in jobs" :key="job.jobId" :job="job" @delete="deleteJob" />
+      <!-- 卡片区域：z-50 保持在磨砂层之上 -->
+      <div v-else class="relative z-50">
+        <draggable
+          v-model="jobs"
+          item-key="jobId"
+          :animation="200"
+          :ghost-class="isOverDelete ? '' : 'dragging-ghost'"
+          @start="onStart"
+          @end="onEnd"
+          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 select-none"
+        >
+          <template #item="{ element }">
+            <JobCard :job="element" />
+          </template>
+        </draggable>
       </div>
     </main>
+
+    <!-- 拖拽磨砂背景 -->
+    <div
+      v-if="isDragging"
+      class="fixed inset-0 z-40 bg-white/30 backdrop-blur-sm transition-all duration-300"
+    ></div>
+
+    <!-- 拖拽删除栏 -->
+    <div
+      v-if="isDragging"
+      class="delete-zone fixed bottom-0 left-0 right-0 z-[60] flex justify-center"
+    >
+      <div
+        class="w-full flex items-center justify-center gap-3 px-10 pt-5 pb-8 rounded-t-2xl border-2 border-dashed border-b-0 transition-all duration-200"
+        :class="isOverDelete
+          ? 'bg-rose-100/80 border-rose-400 text-rose-600'
+          : 'bg-white/60 border-slate-300 text-slate-400'"
+      >
+        <Trash2 :size="22" />
+        <span class="text-base font-bold">拖到这里删除</span>
+      </div>
+    </div>
 
     <NewJobModal
       v-if="isModalOpen && authStore.isAuthenticated"
@@ -151,3 +236,13 @@ onMounted(() => {
     />
   </div>
 </template>
+
+<style>
+.dragging-ghost {
+  opacity: 1;
+  background: rgba(251, 191, 36, 0.08);
+  outline: 2px dashed #f59e0b;
+  outline-offset: -2px;
+  border-radius: 1.5rem;
+}
+</style>

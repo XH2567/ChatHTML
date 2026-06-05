@@ -88,6 +88,11 @@ pub struct TokenQuery {
     pub token: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct ReorderRequest {
+    pub order: Vec<Uuid>,
+}
+
 pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RegisterRequest>,
@@ -568,6 +573,34 @@ pub async fn delete_all_jobs(
             tracing::error!("删除所有任务失败: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
+    }
+}
+
+pub async fn reorder_jobs(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<ReorderRequest>,
+) -> impl IntoResponse {
+    let claims = match require_auth(&state, &headers) {
+        Ok(c) => c,
+        Err(e) => return e.into_response(),
+    };
+
+    // 验证所有 job 属于当前用户
+    for job_id in &req.order {
+        match state.store.load_job(*job_id).await {
+            Ok(Some(job)) => {
+                if job.user_id.as_ref() != Some(&claims.sub) {
+                    return StatusCode::FORBIDDEN.into_response();
+                }
+            }
+            _ => return StatusCode::NOT_FOUND.into_response(),
+        }
+    }
+
+    match state.store.reorder_jobs(&req.order).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 

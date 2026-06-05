@@ -59,6 +59,10 @@ export const jobApi = {
   }): Promise<{ reply: string }> {
     const { data } = await api.post('/chat', payload);
     return data;
+  },
+
+  async reorderJobs(order: string[]): Promise<void> {
+    await api.put('/jobs/reorder', { order });
   }
 };
 

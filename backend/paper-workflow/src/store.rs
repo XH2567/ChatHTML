@@ -98,7 +98,14 @@ impl JobStore {
             }
         }
 
-        jobs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        jobs.sort_by(|a, b| {
+            match (a.sort_order, b.sort_order) {
+                (Some(ao), Some(bo)) => ao.cmp(&bo),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => b.created_at.cmp(&a.created_at),
+            }
+        });
         Ok(jobs)
     }
 
@@ -109,6 +116,17 @@ impl JobStore {
             .into_iter()
             .filter(|job| job.user_id.as_deref() == Some(user_id))
             .collect())
+    }
+
+    /// 批量更新任务排序
+    pub async fn reorder_jobs(&self, job_ids: &[Uuid]) -> Result<()> {
+        for (i, job_id) in job_ids.iter().enumerate() {
+            if let Ok(Some(mut job)) = self.load_job(*job_id).await {
+                job.sort_order = Some(i as i32);
+                self.save_job(&job).await?;
+            }
+        }
+        Ok(())
     }
 
     /// 删除当前用户的所有任务

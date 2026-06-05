@@ -267,6 +267,13 @@ async fn run_latexml_pipeline(job: &mut JobState, store: &JobStore) -> Result<()
     let shim = "package LaTeXML::Package::Pool; use LaTeXML::Package; DefMacro('\\tcbuselibrary{}', ''); 1;";
     tokio::fs::write(overlay_dir.join("tcolorbox.sty.ltxml"), shim).await?;
 
+    // 为 LaTeXML 不擅长处理的包添加 shim（跳过耗时转换）
+    let expl3_shim = "package LaTeXML::Package::Pool; use LaTeXML::Package; DefMacro('\\ExplSyntaxOn', ''); DefMacro('\\ExplSyntaxOff', ''); 1;";
+    tokio::fs::write(overlay_dir.join("expl3.sty.ltxml"), expl3_shim).await?;
+
+    let siunitx_shim = "package LaTeXML::Package::Pool; use LaTeXML::Package; DefMacro('\\SI', '#1#2'); DefMacro('\\si', '#1'); DefMacro('\\num', '#1'); DefMacro('\\unit', '#1'); 1;";
+    tokio::fs::write(overlay_dir.join("siunitx.sty.ltxml"), siunitx_shim).await?;
+
     // 运行 LaTeXML (生成 XML)
     update_stage(job, "LaTeXML", StageStatus::Running, "正在执行编译...").await;
     let xml_path = out_dir.join("main.xml");
@@ -277,7 +284,7 @@ async fn run_latexml_pipeline(job: &mut JobState, store: &JobStore) -> Result<()
         &[
             &format!("--destination={}", rel_xml_path.display()),
             &format!("--path={}", rel_overlay_dir.display()), // 引入补丁路径
-            "--includestyles",
+            // "--includestyles", // 移除以提升速度，HTML转换通常不需要完整样式处理
             &target_tex,
         ],
         &src_dir,

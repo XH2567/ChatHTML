@@ -26,6 +26,7 @@ export interface JobState {
   warnings: string[];
   durationSeconds: number | null;
   artifacts: Record<string, string>;
+  sortOrder?: number;
   stageDetails: StageDetail[];
 }
 

@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import type { JobState } from '../types/api';
-import { Loader2, CheckCircle2, XCircle, Clock, FileText, Database, Trash2 } from 'lucide-vue-next';
+import { Loader2, CheckCircle2, XCircle, Clock, FileText, Database, GripVertical } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 
 const props = defineProps<{ job: JobState }>();
-const emit = defineEmits<{
-  delete: [jobId: string];
-}>();
 const router = useRouter();
 
-// 状态对应的 UI 配置
+let pointerStartX = 0;
+let pointerStartY = 0;
+
 const statusUI = {
   completed: { color: 'text-emerald-600 bg-emerald-50', icon: CheckCircle2, label: '已完成' },
   error: { color: 'text-rose-600 bg-rose-50', icon: XCircle, label: '失败' },
@@ -27,29 +26,28 @@ const goToDetail = () => {
   router.push(`/jobs/${props.job.jobId}`);
 };
 
-// 删除任务
-const deleteJob = (e: Event) => {
-  e.stopPropagation(); // 阻止事件冒泡，避免触发goToDetail
-  if (confirm('确定要删除这个任务吗？')) {
-    emit('delete', props.job.jobId);
-  }
+const onPointerDown = (e: PointerEvent) => {
+  pointerStartX = e.clientX;
+  pointerStartY = e.clientY;
 };
 
+const onPointerUp = (e: PointerEvent) => {
+  const dx = Math.abs(e.clientX - pointerStartX);
+  const dy = Math.abs(e.clientY - pointerStartY);
+  if (dx < 5 && dy < 5) {
+    goToDetail();
+  }
+};
 </script>
 
 <template>
   <div 
-    @click="goToDetail"
-    class="glass-card rounded-3xl p-6 transition-all hover:scale-[1.02] hover:shadow-2xl cursor-pointer group relative"
+    @pointerdown="onPointerDown"
+    @pointerup="onPointerUp"
+    class="glass-card rounded-3xl p-6 transition-all hover:scale-[1.02] hover:shadow-2xl cursor-pointer relative group select-none"
   >
-    <!-- 聊天气泡删除按钮 -->
-    <div class="absolute top-0 right-0 z-10 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-1/2 -translate-y-1/2">
-      <button
-        @click="deleteJob"
-        class="relative flex items-center p-3 bg-white rounded-xl shadow-lg text-slate-500 hover:text-rose-700 hover:bg-rose-200 transition-colors"
-      >
-        <Trash2 :size="16" />
-      </button>
+    <div class="absolute top-3 right-3 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+      <GripVertical :size="14" class="text-slate-300" />
     </div>
     
     <div class="flex justify-between items-start mb-6">

@@ -61,6 +61,10 @@ pub struct JobState {
     // 任务产物，例如 {"html": "out/main.html", "xml": "out/main.xml"}
     pub artifacts: HashMap<String, String>,
 
+    // 排序权重（用于拖拽排序）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<i32>,
+
     // 详细的处理阶段（用于前端时间轴）
     pub stage_details: Vec<StageDetail>,
 
@@ -83,6 +87,7 @@ impl JobState {
             warnings: Vec::new(),
             duration_seconds: None,
             artifacts: HashMap::new(),
+            sort_order: None,
             stage_details: Vec::new(),
             manifest: None,
         }

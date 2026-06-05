@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    routing::{get, post, delete},
+    routing::{get, post, delete, put},
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -53,6 +53,7 @@ async fn main() {
                 .post(routes::create_job)
                 .delete(routes::delete_all_jobs),
         )
+        .route("/api/jobs/reorder", put(routes::reorder_jobs))
         .route(
             "/api/jobs/:id",
             get(routes::get_job).delete(routes::delete_job),
