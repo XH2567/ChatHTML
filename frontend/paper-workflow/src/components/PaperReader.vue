@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
-import { Sparkles, X, Send, Loader2 } from 'lucide-vue-next';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { Sparkles, X, Send, Loader2, Lock, LockOpen } from 'lucide-vue-next';
 import { jobApi } from '../api/client';
+import { useAuthStore } from '../stores/auth';
 import MarkdownIt from 'markdown-it';
 
 const md = new MarkdownIt({
@@ -24,7 +25,13 @@ const chatInput = ref('');
 const messages = ref<{ role: 'user' | 'bot'; content: string }[]>([]);
 const isAiLoading = ref(false);
 const lastManualToggle = ref(0);
+const isLocked = ref(false);
+const hasApiKey = ref(true);
 const paperContainerRef = ref<HTMLDivElement | null>(null);
+
+const authStore = useAuthStore();
+
+const isDisabled = computed(() => !hasApiKey.value || isLocked.value);
 
 // 用户手动切换侧边栏
 const toggleSidebar = () => {
@@ -39,7 +46,10 @@ const closeSidebar = () => {
 };
 
 // 1. 获取论文 HTML URL（通过Vite代理）
-const artifactUrl = `/artifacts/${props.jobId}/out/main.html`;
+const artifactUrl = computed(() => {
+  const token = localStorage.getItem('auth_token');
+  return `/api/jobs/${props.jobId}/out/main.html?token=${token}`;
+});
 
 // 2. 划词监听逻辑 - 使用全局事件监听
 const handleGlobalSelection = () => {
@@ -65,6 +75,12 @@ const handleGlobalSelection = () => {
   
   console.log('最终选中文本:', text, '长度:', text?.length);
   
+  // 如果已锁定或未配置API密钥，不自动打开
+  if (!hasApiKey.value || isLocked.value) {
+    console.log('AI助手不可用（未配置API密钥或已锁定），跳过自动打开');
+    return;
+  }
+
   // 如果用户刚刚手动操作过侧边栏（一秒内），则不自动打开
   const msSinceManual = Date.now() - lastManualToggle.value;
   if (msSinceManual < 1000) {
@@ -129,8 +145,6 @@ const askAi = async () => {
       const data = await jobApi.askAi({
         query: userQuery,
         context: selectedText.value,
-        model: localStorage.getItem('ai-model') || 'deepseek-chat', 
-        api_key: localStorage.getItem('ai-api-key') || '', 
         full_paper: iframeRef.value?.contentDocument?.body.innerText.slice(0, 50000) || ''
       });
       messages.value.push({ role: 'bot', content: data.reply });
@@ -217,16 +231,10 @@ const onIframeLoad = () => {
   console.log('全局 click 事件监听器已添加');
 };
 
-onMounted(() => {
-  // 检查本地存储中是否有 API Key
-  const key = localStorage.getItem('ai-api-key');
-  if (!key) {
-    console.warn("未检测到 AI API Key，请在设置中配置以启用对话功能。");
-    // 你也可以在这里触发一个弹窗提示用户
-  }
-  
-  // 设置滚轮事件转发（论文内容框外部滚动滚轮也能滚动论文内容）
+onMounted(async () => {
   setupWheelForwarding();
+  const result = await authStore.getApiKey();
+  hasApiKey.value = result.has_key;
 });
 
 onUnmounted(() => {
@@ -243,14 +251,31 @@ onUnmounted(() => {
 
 <template>
   <div class="relative flex h-[calc(100vh-5px)] w-full bg-slate-50 overflow-hidden">
-    <!-- 悬浮按钮 - 固定在页面右上角，仅图标，助手打开时隐藏 -->
-    <button 
-      v-if="!isSidebarOpen"
-      @click="toggleSidebar"
-      class="absolute top-4 right-4 z-10 p-2.5 bg-white border border-slate-200 rounded-lg shadow-md hover:bg-slate-50 transition-colors"
-    >
-      <Sparkles :size="20" class="text-amber-500" />
-    </button>
+    <!-- 悬浮按钮组 - 固定在页面右上角，助手打开时隐藏 -->
+    <div v-if="!isSidebarOpen" class="absolute top-4 right-4 z-10 flex flex-col items-center gap-2">
+      <button
+        @click="toggleSidebar"
+        :disabled="isDisabled"
+        :class="[
+          'p-2.5 border rounded-lg shadow-md transition-colors',
+          isDisabled
+            ? 'bg-slate-100 border-slate-200 cursor-not-allowed'
+            : 'bg-white border-slate-200 hover:bg-slate-50'
+        ]"
+        :title="isDisabled ? (hasApiKey ? '已锁定，请先解锁' : '请先配置API密钥') : '打开AI助手'"
+      >
+        <Sparkles :size="20" :class="isDisabled ? 'text-slate-300' : 'text-amber-500'" />
+      </button>
+      <button
+        v-if="hasApiKey"
+        @click="isLocked = !isLocked"
+        class="p-2.5 bg-white border border-slate-200 rounded-lg shadow-md hover:bg-slate-50 transition-colors"
+        :title="isLocked ? '已锁定，点击解锁' : '已解锁，点击锁定'"
+      >
+        <Lock v-if="isLocked" :size="20" class="text-slate-400" />
+        <LockOpen v-else :size="20" class="text-slate-400" />
+      </button>
+    </div>
     
     <!-- 左侧：论文内容区（居中显示，侧边栏打开时平滑左移） -->
     <div ref="paperContainerRef" :class="[

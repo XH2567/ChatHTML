@@ -22,7 +22,6 @@ impl JobStore {
         let job = JobState::new(source_mode, arxiv_id);
         let job_dir = self.base_dir.join(job.job_id.to_string());
 
-        // 创建目录结构
         let dirs = ["original", "src", "normalized", "out", "meta", "log"];
         for dir in dirs {
             fs::create_dir_all(job_dir.join(dir))
@@ -30,7 +29,26 @@ impl JobStore {
                 .with_context(|| format!("无法创建目录: {}", dir))?;
         }
 
-        // 保存初始状态
+        self.save_job(&job).await?;
+        Ok(job)
+    }
+
+    pub async fn create_job_with_user(
+        &self,
+        source_mode: crate::models::SourceMode,
+        arxiv_id: Option<String>,
+        user_id: &str,
+    ) -> Result<JobState> {
+        let job = JobState::new(source_mode, arxiv_id).with_user_id(user_id.to_string());
+        let job_dir = self.base_dir.join(job.job_id.to_string());
+
+        let dirs = ["original", "src", "normalized", "out", "meta", "log"];
+        for dir in dirs {
+            fs::create_dir_all(job_dir.join(dir))
+                .await
+                .with_context(|| format!("无法创建目录: {}", dir))?;
+        }
+
         self.save_job(&job).await?;
         Ok(job)
     }
@@ -72,7 +90,6 @@ impl JobStore {
 
         while let Some(entry) = entries.next_entry().await? {
             if entry.file_type().await?.is_dir() {
-                // 尝试解析目录名为 UUID
                 if let Ok(job_id) = Uuid::parse_str(&entry.file_name().to_string_lossy()) {
                     if let Ok(Some(job)) = self.load_job(job_id).await {
                         jobs.push(job);
@@ -81,9 +98,26 @@ impl JobStore {
             }
         }
 
-        // 按创建时间排序
         jobs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(jobs)
+    }
+
+    /// 获取当前用户的所有任务
+    pub async fn list_jobs_by_user(&self, user_id: &str) -> Result<Vec<JobState>> {
+        let all_jobs = self.list_jobs().await?;
+        Ok(all_jobs
+            .into_iter()
+            .filter(|job| job.user_id.as_deref() == Some(user_id))
+            .collect())
+    }
+
+    /// 删除当前用户的所有任务
+    pub async fn delete_all_jobs_by_user(&self, user_id: &str) -> Result<()> {
+        let jobs = self.list_jobs_by_user(user_id).await?;
+        for job in jobs {
+            self.delete_job(job.job_id).await?;
+        }
+        Ok(())
     }
 
     /// 获取任务特定文件的物理路径
@@ -120,7 +154,6 @@ impl JobStore {
 
         while let Some(entry) = entries.next_entry().await? {
             if entry.file_type().await?.is_dir() {
-                // 尝试解析目录名为 UUID
                 if let Ok(job_id) = Uuid::parse_str(&entry.file_name().to_string_lossy()) {
                     self.delete_job(job_id).await?;
                 }

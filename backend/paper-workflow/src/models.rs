@@ -47,6 +47,7 @@ pub enum SourceMode {
 #[serde(rename_all = "camelCase")]
 pub struct JobState {
     pub job_id: Uuid,
+    pub user_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub status: JobStatus,
     pub source_mode: SourceMode,
@@ -71,6 +72,7 @@ impl JobState {
     pub fn new(source_mode: SourceMode, arxiv_id: Option<String>) -> Self {
         Self {
             job_id: Uuid::new_v4(),
+            user_id: None,
             created_at: Utc::now(),
             status: JobStatus::Created,
             source_mode,
@@ -84,5 +86,10 @@ impl JobState {
             stage_details: Vec::new(),
             manifest: None,
         }
+    }
+
+    pub fn with_user_id(mut self, user_id: String) -> Self {
+        self.user_id = Some(user_id);
+        self
     }
 }

@@ -9,3 +9,12 @@ export const router = createRouter({
     { path: '/jobs/:id', component: ReaderView },
   ],
 });
+
+router.beforeEach((to, _from, next) => {
+  const token = localStorage.getItem('auth_token');
+  if (!token && to.path !== '/') {
+    next('/');
+  } else {
+    next();
+  }
+});

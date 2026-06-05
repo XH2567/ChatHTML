@@ -42,13 +42,15 @@ const deleteJob = (e: Event) => {
     @click="goToDetail"
     class="glass-card rounded-3xl p-6 transition-all hover:scale-[1.02] hover:shadow-2xl cursor-pointer group relative"
   >
-    <!-- 删除按钮 -->
-    <button 
-      @click="deleteJob"
-      class="absolute top-4 right-4 p-2 bg-white/80 hover:bg-white rounded-full text-slate-500 hover:text-rose-600 transition-all opacity-0 group-hover:opacity-100 z-10 shadow-sm"
-    >
-      <Trash2 :size="14" />
-    </button>
+    <!-- 聊天气泡删除按钮 -->
+    <div class="absolute top-0 right-0 z-10 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-1/2 -translate-y-1/2">
+      <button
+        @click="deleteJob"
+        class="relative flex items-center p-3 bg-white rounded-xl shadow-lg text-slate-500 hover:text-rose-700 hover:bg-rose-200 transition-colors"
+      >
+        <Trash2 :size="16" />
+      </button>
+    </div>
     
     <div class="flex justify-between items-start mb-6">
       <div class="flex flex-col">
