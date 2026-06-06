@@ -1,6 +1,6 @@
 use crate::ai::ChatRequest;
 use crate::auth::{AppAuth, Claims};
-use crate::models::SourceMode;
+use crate::models::{QueryHistory, SourceMode};
 use crate::store::JobStore;
 use axum::{
     Json,
@@ -726,6 +726,105 @@ pub async fn get_html_content(
             .into_response(),
         Err(e) => {
             tracing::error!("读取HTML文件失败: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SaveQueryHistoryRequest {
+    pub text_excerpt: String,
+    pub text_hash: String,
+    pub query: String,
+    pub reply: String,
+}
+
+pub async fn save_query_history(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(job_id): Path<Uuid>,
+    Json(req): Json<SaveQueryHistoryRequest>,
+) -> impl IntoResponse {
+    let claims = match require_auth(&state, &headers) {
+        Ok(c) => c,
+        Err(e) => return e.into_response(),
+    };
+
+    match state.store.load_job(job_id).await {
+        Ok(Some(job)) => {
+            if job.user_id.as_ref() != Some(&claims.sub) {
+                return StatusCode::FORBIDDEN.into_response();
+            }
+        }
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+
+    let history = QueryHistory::new(req.text_excerpt, req.text_hash, req.query, req.reply);
+
+    match state.store.save_query_history(job_id, &history).await {
+        Ok(_) => StatusCode::CREATED.into_response(),
+        Err(e) => {
+            tracing::error!("保存查询历史失败: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+pub async fn list_query_histories(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(job_id): Path<Uuid>,
+) -> impl IntoResponse {
+    let claims = match require_auth(&state, &headers) {
+        Ok(c) => c,
+        Err(e) => return e.into_response(),
+    };
+
+    match state.store.load_job(job_id).await {
+        Ok(Some(job)) => {
+            if job.user_id.as_ref() != Some(&claims.sub) {
+                return StatusCode::FORBIDDEN.into_response();
+            }
+        }
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+
+    match state.store.list_query_histories(job_id).await {
+        Ok(histories) => Json(histories).into_response(),
+        Err(e) => {
+            tracing::error!("列出查询历史失败: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+pub async fn get_query_history(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((job_id, text_hash)): Path<(Uuid, String)>,
+) -> impl IntoResponse {
+    let claims = match require_auth(&state, &headers) {
+        Ok(c) => c,
+        Err(e) => return e.into_response(),
+    };
+
+    match state.store.load_job(job_id).await {
+        Ok(Some(job)) => {
+            if job.user_id.as_ref() != Some(&claims.sub) {
+                return StatusCode::FORBIDDEN.into_response();
+            }
+        }
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+
+    match state.store.get_query_history(job_id, &text_hash).await {
+        Ok(Some(history)) => Json(history).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            tracing::error!("获取查询历史失败: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }

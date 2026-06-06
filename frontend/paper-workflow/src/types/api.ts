@@ -58,3 +58,11 @@ export const API_PROVIDERS: { value: ApiProvider; label: string }[] = [
   { value: 'zhipu', label: '智谱AI' },
   { value: 'custom', label: '自定义' },
 ];
+
+export interface QueryHistory {
+  text_excerpt: string;
+  text_hash: string;
+  query: string;
+  reply: string;
+  timestamp: string;
+}

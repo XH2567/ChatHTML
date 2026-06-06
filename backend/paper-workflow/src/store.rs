@@ -1,4 +1,4 @@
-use crate::models::JobState;
+use crate::models::{JobState, QueryHistory};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -179,5 +179,58 @@ impl JobStore {
         }
 
         Ok(())
+    }
+
+    pub async fn save_query_history(&self, job_id: Uuid, history: &QueryHistory) -> Result<()> {
+        let query_dir = self.base_dir.join(job_id.to_string()).join("query_history");
+        fs::create_dir_all(&query_dir).await.context("创建 query_history 目录失败")?;
+
+        let path = query_dir.join(format!("{}.json", history.text_hash));
+        let json = serde_json::to_string_pretty(history)?;
+        fs::write(path, json).await.context("写入 query_history 失败")?;
+        Ok(())
+    }
+
+    pub async fn list_query_histories(&self, job_id: Uuid) -> Result<Vec<QueryHistory>> {
+        let query_dir = self.base_dir.join(job_id.to_string()).join("query_history");
+
+        if !query_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut histories = Vec::new();
+        let mut entries = fs::read_dir(&query_dir).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            if entry.file_type().await?.is_file() {
+                if let Some(ext) = entry.path().extension() {
+                    if ext == "json" {
+                        let content = fs::read_to_string(entry.path()).await?;
+                        if let Ok(history) = serde_json::from_str::<QueryHistory>(&content) {
+                            histories.push(history);
+                        }
+                    }
+                }
+            }
+        }
+
+        histories.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        Ok(histories)
+    }
+
+    pub async fn get_query_history(&self, job_id: Uuid, text_hash: &str) -> Result<Option<QueryHistory>> {
+        let path = self
+            .base_dir
+            .join(job_id.to_string())
+            .join("query_history")
+            .join(format!("{}.json", text_hash));
+
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        let content = fs::read_to_string(path).await?;
+        let history = serde_json::from_str(&content)?;
+        Ok(Some(history))
     }
 }

@@ -61,6 +61,15 @@ async fn main() {
         .route("/api/chat", post(routes::ai_chat_proxy))
         .route("/api/jobs/:id/out/*path", get(routes::get_out_artifact))
         .route("/api/jobs/:id/html", get(routes::get_html_content))
+        .route(
+            "/api/jobs/:id/query-history",
+            post(routes::save_query_history)
+                .get(routes::list_query_histories),
+        )
+        .route(
+            "/api/jobs/:id/query-history/:text_hash",
+            get(routes::get_query_history),
+        )
         .with_state(app_state)
         .layer(TraceLayer::new_for_http())
         .layer(cors);

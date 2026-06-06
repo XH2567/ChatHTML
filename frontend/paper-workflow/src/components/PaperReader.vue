@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { Sparkles, X, Send, Loader2, Lock, LockOpen } from 'lucide-vue-next';
 import { jobApi } from '../api/client';
 import { useAuthStore } from '../stores/auth';
@@ -11,10 +11,17 @@ const md = new MarkdownIt({
   typographer: true,
 });
 
-// 将 Markdown 文本渲染为 HTML
 const renderMarkdown = (text: string) => {
   return md.render(text);
 };
+
+async function sha256(text: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(text);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 const props = defineProps<{ jobId: string }>();
 
@@ -28,94 +35,132 @@ const lastManualToggle = ref(0);
 const isLocked = ref(false);
 const hasApiKey = ref(true);
 const paperContainerRef = ref<HTMLDivElement | null>(null);
+const markerRanges = ref<Map<string, Range>>(new Map());
+const savedSelectionRange = ref<Range | null>(null);
+const isContinuationMode = ref(false);
+const activeHistoryHash = ref<string | null>(null);
+const markerItems = ref<{ hash: string; excerpt: string }[]>([]);
+const markerPanelCollapsed = ref(false);
+
+function updateMarkerItems() {
+  const iframeDoc = iframeRef.value?.contentDocument;
+  if (!iframeDoc) { markerItems.value = []; return; }
+  const markers = iframeDoc.querySelectorAll('.ai-query-marker');
+  const items: { hash: string; excerpt: string }[] = [];
+  markers.forEach(m => {
+    const el = m as HTMLElement;
+    const hash = el.dataset.hash;
+    const excerpt = el.dataset.excerpt || '';
+    if (hash) items.push({ hash, excerpt });
+  });
+  markerItems.value = items;
+}
+
+function scrollToMarker(hash: string) {
+  const iframeDoc = iframeRef.value?.contentDocument;
+  if (!iframeDoc) return;
+  const marker = iframeDoc.querySelector(`.ai-query-marker[data-hash="${hash}"]`) as HTMLElement | null;
+  if (marker) {
+    marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    loadHistoryForMarker(hash);
+  }
+}
 
 const authStore = useAuthStore();
 
 const isDisabled = computed(() => !hasApiKey.value || isLocked.value);
 
-// 用户手动切换侧边栏
 const toggleSidebar = () => {
   lastManualToggle.value = Date.now();
   isSidebarOpen.value = !isSidebarOpen.value;
 };
 
-// 用户手动关闭侧边栏
 const closeSidebar = () => {
   lastManualToggle.value = Date.now();
   isSidebarOpen.value = false;
 };
 
-// 1. 获取论文 HTML URL（通过Vite代理）
 const artifactUrl = computed(() => {
   const token = localStorage.getItem('auth_token');
   return `/api/jobs/${props.jobId}/out/main.html?token=${token}`;
 });
 
-// 2. 划词监听逻辑 - 使用全局事件监听
 const handleGlobalSelection = () => {
   console.log('handleGlobalSelection 被调用');
-  
-  // 尝试从主窗口获取选中文本
-  const selection = window.getSelection();
-  console.log('主窗口 selection 对象:', selection);
-  
-  // 如果主窗口没有选中文本，尝试从iframe获取
-  let text = selection?.toString().trim();
-  
+
+  let text = '';
+  let selectionObj: Selection | null = null;
+
+  // 先尝试主窗口
+  const mainSelection = window.getSelection();
+  if (mainSelection && mainSelection.toString().trim()) {
+    text = mainSelection.toString().trim();
+    selectionObj = mainSelection;
+    console.log('主窗口选中文本:', text);
+  }
+
+  // 如果主窗口没有，尝试 iframe
   if (!text && iframeRef.value?.contentWindow) {
     try {
-      // 尝试从iframe窗口获取选中文本
       const iframeSelection = iframeRef.value.contentWindow.getSelection();
-      text = iframeSelection?.toString().trim();
-      console.log('iframe 选中文本:', text);
+      if (iframeSelection && iframeSelection.toString().trim()) {
+        text = iframeSelection.toString().trim();
+        selectionObj = iframeSelection;
+        console.log('iframe 选中文本:', text);
+      }
     } catch (error) {
       console.log('无法访问iframe的selection对象:', error);
     }
   }
-  
+
   console.log('最终选中文本:', text, '长度:', text?.length);
-  
-  // 如果已锁定或未配置API密钥，不自动打开
+
   if (!hasApiKey.value || isLocked.value) {
     console.log('AI助手不可用（未配置API密钥或已锁定），跳过自动打开');
     return;
   }
 
-  // 如果用户刚刚手动操作过侧边栏（一秒内），则不自动打开
   const msSinceManual = Date.now() - lastManualToggle.value;
   if (msSinceManual < 1000) {
     console.log('用户刚手动操作过侧边栏，跳过自动打开');
     return;
   }
-  
+
   if (text && text.length > 2) {
     selectedText.value = text;
-    // 自动打开侧边栏
+    isContinuationMode.value = false;
+    activeHistoryHash.value = null;
+    messages.value = [];
+
+    // 保存选中的 Range 对象
+    if (selectionObj && selectionObj.rangeCount > 0) {
+      savedSelectionRange.value = selectionObj.getRangeAt(0).cloneRange();
+      console.log('选区已保存');
+    } else {
+      savedSelectionRange.value = null;
+      console.log('无法保存选区（无有效selection）');
+    }
+
     isSidebarOpen.value = true;
     console.log('侧边栏已打开，选中文本:', text);
   } else {
-    // 清空选中内容
     selectedText.value = '';
     console.log('文本太短或为空，清空选中内容');
   }
 };
 
-// 在论文内容框外部滚动滚轮时，转发到 iframe 内部
 const handleContainerWheel = (event: WheelEvent) => {
   const iframeWin = iframeRef.value?.contentWindow;
   const iframeEl = iframeRef.value;
   if (!iframeWin || !iframeEl) return;
-  
-  // 如果事件目标在 iframe 内部，让 iframe 原生处理滚轮，避免双重滚动
+
   const target = event.target as Node;
   if (iframeEl.contains(target) || iframeEl === target) {
     return;
   }
-  
-  // 防止默认行为（例如页面整体滚动）
+
   event.preventDefault();
-  
-  // 将滚轮滚动转发到 iframe 内部
+
   iframeWin.scrollBy({
     top: event.deltaY,
     behavior: 'auto'
@@ -132,52 +177,334 @@ const setupWheelForwarding = () => {
   console.log('论文容器滚轮事件转发已设置');
 };
 
-// 3. 发送 AI 请求
+async function injectMarker(text: string, range: Range, hash?: string) {
+  const iframeDoc = iframeRef.value?.contentDocument;
+  if (!iframeDoc) {
+    console.error('injectMarker: 无法获取 iframe contentDocument');
+    return;
+  }
+
+  const markerHash = hash || await sha256(text);
+  const excerpt = text.slice(0, 100);
+
+  console.log('injectMarker 被调用, text长度:', text.length, 'hash:', markerHash);
+
+  const marker = iframeDoc.createElement('span');
+  marker.className = 'ai-query-marker';
+  marker.dataset.hash = markerHash;
+  marker.dataset.excerpt = excerpt;
+  marker.title = '点击查看历史记录';
+
+  try {
+    console.log('range commonAncestorContainer:', range.commonAncestorContainer);
+    console.log('range.startContainer:', range.startContainer);
+
+    const clonedRange = range.cloneRange();
+    clonedRange.collapse(false);
+    clonedRange.insertNode(marker);
+
+    const storedRange = range.cloneRange();
+    markerRanges.value.set(markerHash, storedRange);
+
+    marker.addEventListener('mouseenter', () => highlightText(markerHash, true));
+    marker.addEventListener('mouseleave', () => highlightText(markerHash, false));
+    marker.addEventListener('click', () => loadHistoryForMarker(markerHash));
+
+    updateMarkerItems();
+    console.log('标记已注入成功, hash:', markerHash);
+  } catch (e) {
+    console.error('注入标记失败:', e);
+  }
+}
+
+function highlightText(hash: string, highlight: boolean) {
+  const storedRange = markerRanges.value.get(hash);
+  if (!storedRange) return;
+
+  try {
+    const iframeDoc = iframeRef.value?.contentDocument;
+    if (!iframeDoc) return;
+
+    if (highlight) {
+      const existingHighlight = iframeDoc.querySelector(`.ai-query-highlight[data-hash="${hash}"]`);
+      if (existingHighlight) return;
+
+      const highlightSpan = iframeDoc.createElement('span');
+      highlightSpan.className = 'ai-query-highlight';
+      highlightSpan.dataset.hash = hash;
+
+      const contents = storedRange.cloneContents();
+      highlightSpan.appendChild(contents);
+
+      storedRange.deleteContents();
+      storedRange.insertNode(highlightSpan);
+    } else {
+      const highlightSpan = iframeDoc.querySelector(`.ai-query-highlight[data-hash="${hash}"]`);
+      if (highlightSpan) {
+        const parent = highlightSpan.parentNode;
+        while (highlightSpan.firstChild) {
+          parent?.insertBefore(highlightSpan.firstChild, highlightSpan);
+        }
+        parent?.removeChild(highlightSpan);
+      }
+    }
+  } catch (e) {
+    console.error('高亮处理失败:', e);
+  }
+}
+
+async function loadHistoryForMarker(hash: string) {
+  try {
+    const history = await jobApi.getQueryHistoryForText(props.jobId, hash);
+    messages.value = [
+      { role: 'user', content: history.query },
+      { role: 'bot', content: history.reply }
+    ];
+    selectedText.value = history.text_excerpt;
+    isContinuationMode.value = true;
+    activeHistoryHash.value = hash;
+    lastManualToggle.value = Date.now();
+    isSidebarOpen.value = true;
+    console.log('进入继续模式, hash:', hash);
+  } catch (err: any) {
+    console.error('加载历史记录失败:', err);
+  }
+}
+
 const askAi = async () => {
   if (!chatInput.value.trim()) return;
-  
+
   const userQuery = chatInput.value;
-  messages.value.push({ role: 'user', content: userQuery });
   chatInput.value = '';
+
+  // 非继续模式：清空对话，开始新的一轮
+  if (!isContinuationMode.value) {
+    messages.value = [];
+  }
+
+  messages.value.push({ role: 'user', content: userQuery });
   isAiLoading.value = true;
 
-    try {
-      const data = await jobApi.askAi({
-        query: userQuery,
-        context: selectedText.value,
-        full_paper: iframeRef.value?.contentDocument?.body.innerText.slice(0, 50000) || ''
-      });
-      messages.value.push({ role: 'bot', content: data.reply });
-    } catch (err: any) {
-      // 尝试从后端响应中提取具体错误信息
-      const errorMsg = err?.response?.data?.error || err?.message || '未知错误';
-      messages.value.push({ role: 'bot', content: `AI 响应失败: ${errorMsg}` });
-    } finally {
-      isAiLoading.value = false;
+  try {
+    let context = selectedText.value;
+
+    if (context.length > 3000) {
+      messages.value.push({ role: 'bot', content: `选中文本较长（${context.length} 字符），将使用前 3000 字符作为上下文，其余部分会被截断。如需处理全文，请分段选择后分别提问。` });
+      context = context.slice(0, 3000);
     }
+
+    // 继续模式：将对话历史注入查询，让 AI 理解上下文
+    let queryToSend = userQuery;
+    if (isContinuationMode.value) {
+      const historyText = messages.value
+        .slice(0, -1)
+        .map(m => `${m.role === 'user' ? '用户' : 'AI'}: ${m.content}`)
+        .join('\n\n');
+      queryToSend = `以下是关于这段文本的对话历史：\n${historyText}\n\n---\n\n请根据以上对话历史，回答下面的新问题：\n${userQuery}`;
+    }
+
+    const data = await jobApi.askAi({
+      query: queryToSend,
+      context: context,
+      full_paper: iframeRef.value?.contentDocument?.body.innerText.slice(0, 50000) || ''
+    });
+    messages.value.push({ role: 'bot', content: data.reply });
+
+    // 非继续模式：保存历史并注入标记
+    if (!isContinuationMode.value && selectedText.value && savedSelectionRange.value) {
+      const hash = await sha256(selectedText.value);
+      const excerpt = selectedText.value.slice(0, 3000);
+
+      await jobApi.saveQueryHistory(props.jobId, {
+        text_excerpt: excerpt,
+        text_hash: hash,
+        query: userQuery,
+        reply: data.reply
+      });
+
+      await injectMarker(selectedText.value, savedSelectionRange.value);
+    }
+  } catch (err: any) {
+    const errorMsg = err?.response?.data?.error || err?.message || '未知错误';
+    messages.value.push({ role: 'bot', content: `AI 响应失败: ${errorMsg}` });
+  } finally {
+    isAiLoading.value = false;
+  }
 };
 
-// 4. 使用全局事件监听
+function findTextInDocument(doc: Document, text: string): Range | null {
+  const blockTags = new Set([
+    'P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+    'LI', 'TD', 'TH', 'BLOCKQUOTE', 'PRE', 'HR',
+    'FIGURE', 'FIGCAPTION', 'SECTION', 'HEADER', 'FOOTER',
+    'NAV', 'ARTICLE', 'ASIDE', 'MAIN', 'OL', 'UL', 'DL',
+  ]);
+
+  type Segment = { text: string; node: Text | null };
+  const segments: Segment[] = [];
+
+  function walk(el: Node) {
+    let child = el.firstChild;
+    while (child) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        const t = child as Text;
+        if (t.textContent) {
+          segments.push({ text: t.textContent, node: t });
+        }
+      } else if (child.nodeType === Node.ELEMENT_NODE) {
+        const tag = (child as Element).tagName;
+        const isBlock = blockTags.has(tag);
+        if (isBlock && segments.length > 0) {
+          const last = segments[segments.length - 1];
+          if (last.text.length > 0 && !last.text.endsWith('\n')) {
+            segments.push({ text: '\n', node: null });
+          }
+        }
+        walk(child);
+        if (isBlock) {
+          const last = segments[segments.length - 1];
+          if (last && last.text.length > 0 && !last.text.endsWith('\n')) {
+            segments.push({ text: '\n', node: null });
+          }
+        }
+      }
+      child = child.nextSibling;
+    }
+  }
+
+  walk(doc.body);
+
+  const content = segments.map(s => s.text).join('');
+  const searchText = text.replace(/\n+/g, '\n');
+  const contentNorm = content.replace(/\n+/g, '\n');
+  const index = contentNorm.indexOf(searchText);
+  if (index === -1) return null;
+
+  const endIndex = index + searchText.length;
+
+  // Build positions within the NORMALIZED content
+  // normalizedPositions[i] = position of segment i's first char in normalized content
+  const normSegStarts: number[] = [];
+  let pos = 0;
+  for (let i = 0; i < segments.length; i++) {
+    // Record the start position of this segment in normalized content
+    normSegStarts.push(pos);
+    const segNorm = segments[i].text.replace(/\n+/g, '\n');
+    pos += segNorm.length;
+  }
+
+  // Find start segment
+  let startSegIdx = 0;
+  for (let i = normSegStarts.length - 1; i >= 0; i--) {
+    if (normSegStarts[i] <= index) {
+      startSegIdx = i;
+      break;
+    }
+  }
+  const startOffsetInNorm = index - normSegStarts[startSegIdx];
+
+  // Find end segment
+  let endSegIdx = 0;
+  for (let i = normSegStarts.length - 1; i >= 0; i--) {
+    if (normSegStarts[i] < endIndex) {
+      endSegIdx = i;
+      break;
+    }
+  }
+  const endOffsetInNorm = endIndex - normSegStarts[endSegIdx];
+
+  // Map normalized offset to original text node offset
+  const startSeg = segments[startSegIdx];
+  const endSeg = segments[endSegIdx];
+  if (!startSeg || !endSeg) return null;
+
+  function normOffsetToOriginal(segText: string, normOff: number): number {
+    let origPos = 0;
+    let normPos = 0;
+    while (normPos < normOff && origPos < segText.length) {
+      const nc = segText[origPos];
+      const isNewline = nc === '\n';
+      if (isNewline) {
+        // Consume all consecutive \n in original as 1 in normalized
+        let origEnd = origPos;
+        while (origEnd < segText.length && segText[origEnd] === '\n') origEnd++;
+        if (normPos + 1 <= normOff) {
+          normPos++;
+          origPos = origEnd;
+        } else {
+          break;
+        }
+      } else {
+        origPos++;
+        normPos++;
+      }
+    }
+    return origPos;
+  }
+
+  const origStartOffset = normOffsetToOriginal(startSeg.text, startOffsetInNorm);
+  const origEndOffset = normOffsetToOriginal(endSeg.text, endOffsetInNorm);
+
+  const range = doc.createRange();
+  range.setStart(startSeg.node!, origStartOffset);
+  range.setEnd(endSeg.node!, origEndOffset);
+  return range;
+}
+
+async function restoreMarkers() {
+  const iframeDoc = iframeRef.value?.contentDocument;
+  if (!iframeDoc || !iframeDoc.body) return;
+
+  try {
+    const histories = await jobApi.getQueryHistory(props.jobId);
+    console.log(`restoreMarkers: 获取到 ${histories.length} 条历史记录`);
+    let restoredCount = 0;
+    for (const h of histories) {
+      if (iframeDoc.querySelector(`.ai-query-marker[data-hash="${h.text_hash}"]`)) continue;
+      if (!h.text_excerpt) continue;
+
+      const range = findTextInDocument(iframeDoc, h.text_excerpt);
+      if (range) {
+        await injectMarker(h.text_excerpt, range, h.text_hash);
+        restoredCount++;
+      }
+    }
+    console.log(`restoreMarkers: 成功恢复 ${restoredCount}/${histories.length} 个标记`);
+    updateMarkerItems();
+
+    // 自动加载最近一条历史记录到侧边栏
+    if (histories.length > 0) {
+      const recent = histories[0];
+      messages.value = [
+        { role: 'user', content: recent.query },
+        { role: 'bot', content: recent.reply }
+      ];
+      selectedText.value = recent.text_excerpt;
+      isContinuationMode.value = true;
+      activeHistoryHash.value = recent.text_hash;
+    }
+  } catch (err) {
+    console.error('恢复标记失败:', err);
+  }
+}
+
 const onIframeLoad = () => {
   console.log('iframe 加载完成');
-  
-  // 检查 iframe 是否可访问
+
   if (iframeRef.value) {
     console.log('iframe 引用存在:', iframeRef.value);
     console.log('iframe src:', iframeRef.value.src);
-    
+
     try {
       const iframeDoc = iframeRef.value.contentDocument;
       console.log('iframe contentDocument:', iframeDoc ? '可访问' : '不可访问（跨域限制）');
-      
-      // 尝试在 iframe 内部添加事件监听（如果跨域允许）
+
       if (iframeDoc) {
         iframeDoc.addEventListener('mouseup', handleGlobalSelection);
         console.log('iframe 内部 mouseup 事件监听器已添加');
         iframeDoc.addEventListener('selectionchange', handleGlobalSelection);
         console.log('iframe 内部 selectionchange 事件监听器已添加');
-        
-        // 注入 CSS 以防止论文内容超界（横向溢出）
+
         const style = document.createElement('style');
         style.textContent = `
           * {
@@ -204,27 +531,44 @@ const onIframeLoad = () => {
             display: block !important;
             overflow-x: auto !important;
           }
+          .ai-query-marker {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            background: #f59e0b;
+            border-radius: 50%;
+            margin-left: 4px;
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+            vertical-align: middle;
+          }
+          .ai-query-marker:hover {
+            opacity: 1;
+          }
+          .ai-query-highlight {
+            background-color: #fef3c7;
+            border-radius: 2px;
+          }
         `;
         iframeDoc.head.appendChild(style);
         console.log('iframe 防超界 CSS 已注入');
+
+        restoreMarkers().catch(err => console.error('restoreMarkers error:', err));
       }
     } catch (error) {
       console.log('iframe 访问错误（跨域）:', error);
     }
   }
-  
-  // 在主窗口添加全局鼠标抬起事件监听
+
   document.addEventListener('mouseup', handleGlobalSelection);
   console.log('全局 mouseup 事件监听器已添加');
-  
-  // 同时添加 selectionchange 事件监听，更可靠地捕获文本选择
+
   document.addEventListener('selectionchange', handleGlobalSelection);
   console.log('全局 selectionchange 事件监听器已添加');
-  
-  // 添加点击事件监听作为备选方案
+
   const handleClick = () => {
     console.log('全局 click 事件触发');
-    // 延迟执行，确保选择已经完成
     setTimeout(handleGlobalSelection, 100);
   };
   document.addEventListener('click', handleClick);
@@ -235,13 +579,36 @@ onMounted(async () => {
   setupWheelForwarding();
   const result = await authStore.getApiKey();
   hasApiKey.value = result.has_key;
+
+  const tryRestoreMarkers = () => {
+    const iframeDoc = iframeRef.value?.contentDocument;
+    if (iframeDoc?.readyState === 'complete' && iframeDoc.body?.childNodes.length > 0) {
+      console.log('onMounted: iframe 已就绪，执行 restoreMarkers');
+      restoreMarkers().catch(err => console.error('restoreMarkers error:', err));
+      return true;
+    }
+    return false;
+  };
+
+  await nextTick();
+  if (!tryRestoreMarkers()) {
+    let attempts = 0;
+    const maxAttempts = 20;
+    const interval = setInterval(() => {
+      attempts++;
+      if (tryRestoreMarkers() || attempts >= maxAttempts) {
+        clearInterval(interval);
+        if (attempts >= maxAttempts) {
+          console.warn('onMounted: restoreMarkers 重试超时');
+        }
+      }
+    }, 500);
+  }
 });
 
 onUnmounted(() => {
-  // 移除事件监听
   document.removeEventListener('mouseup', handleGlobalSelection);
-  
-  // 移除滚轮事件转发
+
   const container = paperContainerRef.value;
   if (container) {
     container.removeEventListener('wheel', handleContainerWheel);
@@ -277,6 +644,30 @@ onUnmounted(() => {
       </button>
     </div>
     
+    <!-- 标记索引 - 左端列表 -->
+    <div v-if="markerItems.length > 0" :class="[
+      'shrink-0 border-r border-slate-200 bg-white overflow-y-auto z-30 transition-all duration-200',
+      markerPanelCollapsed ? 'w-12 pt-8' : 'w-48 pt-8 px-3'
+    ]">
+      <div class="flex items-start justify-end mb-3 px-2">
+        <button @click="markerPanelCollapsed = !markerPanelCollapsed"
+          class="text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100 transition-colors"
+          :title="markerPanelCollapsed ? '展开' : '折叠'">
+          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline :points="markerPanelCollapsed ? '9 18 15 12 9 6' : '15 18 9 12 15 6'"/></svg>
+        </button>
+      </div>
+      <div v-for="item in markerItems" :key="item.hash"
+        @click="scrollToMarker(item.hash)"
+        :class="[
+          'flex items-start gap-2 rounded-lg cursor-pointer hover:bg-amber-50 transition-colors',
+          markerPanelCollapsed ? 'p-1.5 justify-center' : 'p-2 text-xs text-slate-600 mb-1'
+        ]"
+        :title="markerPanelCollapsed ? item.excerpt : ''">
+        <span :class="['rounded-full bg-amber-500 shrink-0', markerPanelCollapsed ? 'w-3 h-3' : 'w-3 h-3 mt-0.5']"></span>
+        <span v-if="!markerPanelCollapsed" class="line-clamp-2 leading-relaxed">{{ item.excerpt }}</span>
+      </div>
+    </div>
+
     <!-- 左侧：论文内容区（居中显示，侧边栏打开时平滑左移） -->
     <div ref="paperContainerRef" :class="[
       'flex-1 overflow-hidden paper-container transition-all duration-500 ease-in-out',
@@ -302,6 +693,7 @@ onUnmounted(() => {
         <div class="flex items-center gap-2 font-black text-slate-800">
           <Sparkles class="text-amber-500" :size="20" />
           AI 论文助手
+          <span v-if="isContinuationMode" class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-normal">继续对话</span>
         </div>
         <button @click="closeSidebar" class="p-2 hover:bg-slate-200 rounded-full">
           <X :size="18" />

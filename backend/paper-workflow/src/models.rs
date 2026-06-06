@@ -98,3 +98,24 @@ impl JobState {
         self
     }
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct QueryHistory {
+    pub text_excerpt: String,
+    pub text_hash: String,
+    pub query: String,
+    pub reply: String,
+    pub timestamp: String,
+}
+
+impl QueryHistory {
+    pub fn new(text_excerpt: String, text_hash: String, query: String, reply: String) -> Self {
+        Self {
+            text_excerpt,
+            text_hash,
+            query,
+            reply,
+            timestamp: Utc::now().to_rfc3339(),
+        }
+    }
+}

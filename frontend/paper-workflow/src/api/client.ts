@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { JobState } from '../types/api';
+import type { JobState, QueryHistory } from '../types/api';
 
 const api = axios.create({
   baseURL: 'http://127.0.0.1:8000/api',
@@ -63,6 +63,20 @@ export const jobApi = {
 
   async reorderJobs(order: string[]): Promise<void> {
     await api.put('/jobs/reorder', { order });
+  },
+
+  async saveQueryHistory(jobId: string, history: Omit<QueryHistory, 'timestamp'>): Promise<void> {
+    await api.post(`/jobs/${jobId}/query-history`, history);
+  },
+
+  async getQueryHistory(jobId: string): Promise<QueryHistory[]> {
+    const { data } = await api.get<QueryHistory[]>(`/jobs/${jobId}/query-history`);
+    return data;
+  },
+
+  async getQueryHistoryForText(jobId: string, textHash: string): Promise<QueryHistory> {
+    const { data } = await api.get<QueryHistory>(`/jobs/${jobId}/query-history/${textHash}`);
+    return data;
   }
 };
 
