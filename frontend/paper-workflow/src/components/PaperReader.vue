@@ -193,7 +193,6 @@ async function injectMarker(text: string, range: Range, hash?: string) {
   marker.className = 'ai-query-marker';
   marker.dataset.hash = markerHash;
   marker.dataset.excerpt = excerpt;
-  marker.title = '点击查看历史记录';
 
   try {
     console.log('range commonAncestorContainer:', range.commonAncestorContainer);
@@ -206,8 +205,6 @@ async function injectMarker(text: string, range: Range, hash?: string) {
     const storedRange = range.cloneRange();
     markerRanges.value.set(markerHash, storedRange);
 
-    marker.addEventListener('mouseenter', () => highlightText(markerHash, true));
-    marker.addEventListener('mouseleave', () => highlightText(markerHash, false));
     marker.addEventListener('click', () => loadHistoryForMarker(markerHash));
 
     updateMarkerItems();
@@ -516,10 +513,30 @@ const onIframeLoad = () => {
             word-wrap: break-word !important;
             overflow-wrap: break-word !important;
             word-break: break-word !important;
+            line-height: 1.7 !important;
+            font-family: 'Georgia', 'Times New Roman', 'Noto Serif CJK SC', serif !important;
+            color: #1e293b !important;
+            padding: 2rem !important;
+            max-width: 900px !important;
+            margin: 0 auto !important;
+            background: #faf9f7 !important;
+          }
+          p {
+            margin-bottom: 0.8em !important;
+            text-align: justify !important;
+          }
+          h1, h2, h3, h4, h5, h6 {
+            font-family: 'Helvetica Neue', 'Arial', 'Noto Sans SC', sans-serif !important;
+            color: #0f172a !important;
+            margin-top: 1.2em !important;
+            margin-bottom: 0.5em !important;
+            line-height: 1.3 !important;
           }
           img, video, canvas, svg, object, embed {
             max-width: 100% !important;
             height: auto !important;
+            border-radius: 6px !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06) !important;
           }
           pre, code, blockquote, table, .math, .equation {
             max-width: 100% !important;
@@ -527,9 +544,56 @@ const onIframeLoad = () => {
             white-space: pre-wrap !important;
             word-break: break-word !important;
           }
+          code {
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace !important;
+            font-size: 0.9em !important;
+            background: rgba(0,0,0,0.04) !important;
+            padding: 0.15em 0.4em !important;
+            border-radius: 4px !important;
+          }
+          pre {
+            background: #f1f5f9 !important;
+            border: 1px solid #e2e8f0 !important;
+            border-radius: 8px !important;
+            padding: 1em !important;
+            margin: 1em 0 !important;
+          }
+          pre code {
+            background: transparent !important;
+            padding: 0 !important;
+          }
+          blockquote {
+            border-left: 4px solid #d97706 !important;
+            padding: 0.5em 1em !important;
+            margin: 1em 0 !important;
+            background: rgba(245, 158, 11, 0.06) !important;
+            border-radius: 0 8px 8px 0 !important;
+          }
           table {
             display: block !important;
             overflow-x: auto !important;
+            border-collapse: collapse !important;
+            margin: 1em 0 !important;
+            font-size: 0.9em !important;
+          }
+          th, td {
+            border: 1px solid #e2e8f0 !important;
+            padding: 0.5em 0.75em !important;
+            text-align: left !important;
+          }
+          th {
+            background: #f8fafc !important;
+            font-weight: 600 !important;
+          }
+          a {
+            color: #d97706 !important;
+            text-decoration: none !important;
+          }
+          a:hover {
+            text-decoration: underline !important;
+          }
+          ::selection {
+            background: rgba(245, 158, 11, 0.25) !important;
           }
           .ai-query-marker {
             display: inline-block;
@@ -547,8 +611,14 @@ const onIframeLoad = () => {
             opacity: 1;
           }
           .ai-query-highlight {
-            background-color: #fef3c7;
-            border-radius: 2px;
+            background: linear-gradient(180deg, rgba(254, 243, 199, 0.4) 0%, rgba(253, 230, 138, 0.5) 100%);
+            border-radius: 3px;
+            padding: 0 1px;
+          }
+          @media (max-width: 768px) {
+            body {
+              padding: 1rem !important;
+            }
           }
         `;
         iframeDoc.head.appendChild(style);
@@ -617,17 +687,17 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="relative flex h-[calc(100vh-5px)] w-full bg-slate-50 overflow-hidden">
+  <div class="relative flex h-[calc(100vh-5px)] w-full bg-gradient-to-br from-slate-50 via-white to-slate-100/80 overflow-hidden">
     <!-- 悬浮按钮组 - 固定在页面右上角，助手打开时隐藏 -->
     <div v-if="!isSidebarOpen" class="absolute top-4 right-4 z-10 flex flex-col items-center gap-2">
       <button
         @click="toggleSidebar"
         :disabled="isDisabled"
         :class="[
-          'p-2.5 border rounded-lg shadow-md transition-colors',
+          'p-2.5 border rounded-xl shadow-lg transition-all duration-200 backdrop-blur-sm',
           isDisabled
-            ? 'bg-slate-100 border-slate-200 cursor-not-allowed'
-            : 'bg-white border-slate-200 hover:bg-slate-50'
+            ? 'bg-slate-100/80 border-slate-200 cursor-not-allowed'
+            : 'bg-white/90 border-slate-200/80 hover:bg-white hover:shadow-xl hover:scale-105 active:scale-95'
         ]"
         :title="isDisabled ? (hasApiKey ? '已锁定，请先解锁' : '请先配置API密钥') : '打开AI助手'"
       >
@@ -636,7 +706,7 @@ onUnmounted(() => {
       <button
         v-if="hasApiKey"
         @click="isLocked = !isLocked"
-        class="p-2.5 bg-white border border-slate-200 rounded-lg shadow-md hover:bg-slate-50 transition-colors"
+        class="p-2.5 bg-white/90 border border-slate-200/80 rounded-xl shadow-lg backdrop-blur-sm hover:bg-white hover:shadow-xl hover:scale-105 active:scale-95 transition-all duration-200"
         :title="isLocked ? '已锁定，点击解锁' : '已解锁，点击锁定'"
       >
         <Lock v-if="isLocked" :size="20" class="text-slate-400" />
@@ -646,25 +716,29 @@ onUnmounted(() => {
     
     <!-- 标记索引 - 左端列表 -->
     <div v-if="markerItems.length > 0" :class="[
-      'shrink-0 border-r border-slate-200 bg-white overflow-y-auto z-30 transition-all duration-200',
+      'shrink-0 border-r border-slate-200/80 bg-white/80 backdrop-blur-sm overflow-y-auto z-30 transition-all duration-200',
       markerPanelCollapsed ? 'w-12 pt-8' : 'w-48 pt-8 px-3'
     ]">
-      <div class="flex items-start justify-end mb-3 px-2">
+      <div class="flex items-start justify-end mb-2 px-2">
         <button @click="markerPanelCollapsed = !markerPanelCollapsed"
-          class="text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100 transition-colors"
+          class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-all duration-200"
           :title="markerPanelCollapsed ? '展开' : '折叠'">
-          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline :points="markerPanelCollapsed ? '9 18 15 12 9 6' : '15 18 9 12 15 6'"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline :points="markerPanelCollapsed ? '9 18 15 12 9 6' : '15 18 9 12 15 6'"/></svg>
         </button>
       </div>
       <div v-for="item in markerItems" :key="item.hash"
         @click="scrollToMarker(item.hash)"
         :class="[
-          'flex items-start gap-2 rounded-lg cursor-pointer hover:bg-amber-50 transition-colors',
-          markerPanelCollapsed ? 'p-1.5 justify-center' : 'p-2 text-xs text-slate-600 mb-1'
+          'flex items-start gap-2 rounded-lg cursor-pointer transition-all duration-150 marker-item-hover',
+          markerPanelCollapsed ? 'p-1.5 justify-center' : 'p-2.5 text-xs text-slate-600 mb-1'
         ]"
         :title="markerPanelCollapsed ? item.excerpt : ''">
-        <span :class="['rounded-full bg-amber-500 shrink-0', markerPanelCollapsed ? 'w-3 h-3' : 'w-3 h-3 mt-0.5']"></span>
-        <span v-if="!markerPanelCollapsed" class="line-clamp-2 leading-relaxed">{{ item.excerpt }}</span>
+        <span :class="[
+          'rounded-full shrink-0 ring-2 ring-offset-1',
+          markerPanelCollapsed ? 'w-3 h-3 ring-amber-300' : 'w-2.5 h-2.5 mt-0.5 ring-amber-200',
+          'bg-gradient-to-br from-amber-400 to-orange-500'
+        ]"></span>
+        <span v-if="!markerPanelCollapsed" class="line-clamp-2 leading-relaxed hover:text-amber-700 transition-colors">{{ item.excerpt }}</span>
       </div>
     </div>
 
@@ -673,13 +747,17 @@ onUnmounted(() => {
       'flex-1 overflow-hidden paper-container transition-all duration-500 ease-in-out',
       isSidebarOpen ? 'translate-x-[-200px]' : 'translate-x-[-20px]'
     ]">
-      <div class="max-w-4xl mx-auto h-full pt-4 pb-[60px]">
-        <iframe 
-          ref="iframeRef"
-          :src="artifactUrl"
-          @load="onIframeLoad"
-          class="w-full h-full border-none bg-white shadow-inner rounded-lg"
-        ></iframe>
+      <div class="h-full flex flex-col">
+        <div class="flex-1 max-w-4xl mx-auto w-full px-6 py-6">
+          <div class="h-full rounded-xl bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.04),0_8px_32px_rgba(0,0,0,0.06),0_2px_8px_rgba(0,0,0,0.04)] overflow-hidden">
+            <iframe 
+              ref="iframeRef"
+              :src="artifactUrl"
+              @load="onIframeLoad"
+              class="w-full h-full border-none bg-white"
+            ></iframe>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -689,47 +767,58 @@ onUnmounted(() => {
       isSidebarOpen ? 'translate-x-0' : 'translate-x-full'
     ]">
       <!-- Header -->
-      <div class="p-4 border-b flex justify-between items-center bg-slate-50">
+      <div class="p-4 border-b bg-gradient-to-r from-slate-50 via-white to-slate-50 flex justify-between items-center">
         <div class="flex items-center gap-2 font-black text-slate-800">
-          <Sparkles class="text-amber-500" :size="20" />
+          <div class="p-1.5 bg-gradient-to-br from-amber-400 to-orange-500 rounded-lg shadow-sm">
+            <Sparkles class="text-white" :size="16" />
+          </div>
           AI 论文助手
-          <span v-if="isContinuationMode" class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-normal">继续对话</span>
+          <span v-if="isContinuationMode" class="text-xs bg-gradient-to-r from-amber-100 to-orange-100 text-amber-700 px-2.5 py-0.5 rounded-full font-medium border border-amber-200/50 shadow-sm">继续对话</span>
         </div>
-        <button @click="closeSidebar" class="p-2 hover:bg-slate-200 rounded-full">
-          <X :size="18" />
+        <button @click="closeSidebar" class="p-2 hover:bg-slate-200 rounded-full transition-colors">
+          <X :size="18" class="text-slate-400" />
         </button>
       </div>
 
       <!-- Chat History -->
-      <div class="flex-1 overflow-y-auto p-4 space-y-4">
-        <div v-if="selectedText" class="p-3 bg-amber-50 rounded-xl border border-amber-100 text-xs text-slate-600 italic">
-          “{{ selectedText }}”
+      <div class="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-slate-50/50 to-white">
+        <div v-if="selectedText" class="relative p-3 bg-gradient-to-br from-amber-50 to-orange-50/50 rounded-xl border border-amber-200/60 text-xs text-slate-700 shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+          <div class="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-amber-400 to-orange-400 rounded-r-full"></div>
+          <div class="pl-2.5 leading-relaxed line-clamp-4">
+            <span class="text-amber-500 select-none mr-1">"</span>{{ selectedText }}<span class="text-amber-500 select-none ml-1">"</span>
+          </div>
         </div>
 
         <div v-for="(msg, i) in messages" :key="i" 
-          :class="['max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed', 
-                  msg.role === 'user' ? 'ml-auto bg-slate-900 text-white' : 'mr-auto bg-slate-100 text-slate-700 markdown-body']">
+          :class="['max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm', 
+                  msg.role === 'user' 
+                    ? 'ml-auto bg-gradient-to-br from-slate-800 to-slate-900 text-white rounded-br-md' 
+                    : 'mr-auto bg-gradient-to-br from-slate-50 to-white text-slate-700 markdown-body border border-slate-100 rounded-bl-md']">
           <span v-if="msg.role === 'user'">{{ msg.content }}</span>
           <div v-else v-html="renderMarkdown(msg.content)"></div>
         </div>
         
-        <div v-if="isAiLoading" class="flex items-center gap-2 text-slate-400 text-xs animate-pulse">
-          <Loader2 class="animate-spin" :size="14" /> AI 正在思考...
+        <div v-if="isAiLoading" class="flex items-center gap-2.5 text-slate-500 text-xs">
+          <span class="relative flex items-center justify-center w-5 h-5">
+            <span class="absolute inset-0 rounded-full bg-amber-400/20 animate-ping"></span>
+            <Loader2 class="relative animate-spin text-amber-500" :size="16" />
+          </span>
+          <span class="bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent font-medium">AI 正在思考...</span>
         </div>
       </div>
 
       <!-- Input Area -->
-      <div class="p-4 border-t bg-white">
-        <div class="relative">
+      <div class="p-4 border-t bg-gradient-to-t from-slate-50 to-white">
+        <div class="relative group">
           <input 
             v-model="chatInput"
             @keyup.enter="askAi"
             type="text" 
             placeholder="询问关于划选内容或整篇论文的问题..."
-            class="w-full pl-4 pr-12 py-3 bg-slate-100 rounded-xl text-sm outline-none focus:ring-2 ring-amber-500/20"
+            class="w-full pl-4 pr-12 py-3 bg-white border border-slate-200 rounded-xl text-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-amber-300 focus:shadow-[0_0_0_3px_rgba(251,191,36,0.15),0_2px_8px_rgba(0,0,0,0.04)] hover:border-slate-300"
           />
-          <button @click="askAi" class="absolute right-2 top-1.5 p-1.5 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors">
-            <Send :size="16" />
+          <button @click="askAi" class="absolute right-1.5 top-1/2 -translate-y-1/2 p-2 bg-slate-900 text-white rounded-lg hover:bg-amber-600 active:scale-95 transition-all duration-150 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+            <Send :size="15" />
           </button>
         </div>
       </div>
@@ -738,6 +827,10 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.paper-container {
+  background: linear-gradient(135deg, #f8f6f2 0%, #f0ece6 100%);
+}
+
 .markdown-body h1,
 .markdown-body h2,
 .markdown-body h3,
@@ -822,5 +915,59 @@ onUnmounted(() => {
 .markdown-body th {
   background: #f8fafc;
   font-weight: 600;
+}
+
+.markdown-body > div > *:first-child {
+  margin-top: 0;
+}
+
+.markdown-body > div > *:last-child {
+  margin-bottom: 0;
+}
+
+.message-enter {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+aside > div.flex-1 > div > div {
+  animation: messageSlideIn 0.25s ease-out both;
+}
+
+@keyframes messageSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+aside > div.flex-1 > div > div:nth-child(1) { animation-delay: 0s; }
+aside > div.flex-1 > div > div:nth-child(2) { animation-delay: 0.05s; }
+aside > div.flex-1 > div > div:nth-child(3) { animation-delay: 0.1s; }
+aside > div.flex-1 > div > div:nth-child(4) { animation-delay: 0.15s; }
+aside > div.flex-1 > div > div:nth-child(5) { animation-delay: 0.2s; }
+
+.marker-item-hover:hover {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(217, 119, 6, 0.04));
+  transform: translateX(2px);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.2);
 }
 </style>
