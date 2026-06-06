@@ -1,0 +1,36 @@
+{
+  "providers": {
+    "deepseek": {
+      "name": "DeepSeek",
+      "base_url": "https://api.deepseek.com",
+      "api_path": "/chat/completions",
+      "models": ["deepseek-v4-pro", "deepseek-v4-flash"]
+    },
+    "openai": {
+      "name": "OpenAI",
+      "base_url": "https://api.openai.com/v1",
+      "api_path": "/chat/completions",
+      "models": ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"]
+    },
+    "anthropic": {
+      "name": "Anthropic",
+      "base_url": "https://api.anthropic.com/v1",
+      "api_path": "/messages",
+      "models": ["claude-3-5-sonnet", "claude-3-opus", "claude-3-haiku"],
+      "requires_special_format": true
+    },
+    "google": {
+      "name": "Google AI",
+      "base_url": "https://generativelanguage.googleapis.com/v1",
+      "api_path": "/models/{model}:generateContent",
+      "models": ["gemini-pro", "gemini-1.5-pro"],
+      "requires_special_format": true
+    },
+    "zhipu": {
+      "name": "智谱AI",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "api_path": "/chat/completions",
+      "models": ["glm-4", "glm-3-turbo"]
+    }
+  }
+}

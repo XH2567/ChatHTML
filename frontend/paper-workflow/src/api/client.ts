@@ -1,48 +1,105 @@
 import axios from 'axios';
-import type { JobState } from '../types/api';
+import type { JobState, QueryHistory } from '../types/api';
 
 const api = axios.create({
   baseURL: 'http://127.0.0.1:8000/api',
 });
 
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('auth_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user_id');
+      localStorage.removeItem('auth_username');
+      if (window.location.pathname !== '/') {
+        window.location.href = '/';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const jobApi = {
-  // 获取任务列表
   async listJobs(): Promise<JobState[]> {
     const { data } = await api.get<JobState[]>('/jobs');
     return data;
   },
-  
-  // 获取单个任务详情（用于轮询）
+
   async getJob(id: string): Promise<JobState> {
     const { data } = await api.get<JobState>(`/jobs/${id}`);
     return data;
   },
 
-  // 创建任务
   async createJob(formData: FormData): Promise<JobState> {
     const { data } = await api.post<JobState>('/jobs', formData);
     return data;
   },
 
-  // 删除单个任务
   async deleteJob(id: string): Promise<void> {
     await api.delete(`/jobs/${id}`);
   },
 
-  // 删除所有任务
   async deleteAllJobs(): Promise<void> {
     await api.delete('/jobs');
   },
 
-  // 统一管理 AI 聊天请求
   async askAi(payload: {
     query: string;
     context: string;
-    model: string;
-    api_key: string;
     full_paper: string;
   }): Promise<{ reply: string }> {
     const { data } = await api.post('/chat', payload);
     return data;
+  },
+
+  async reorderJobs(order: string[]): Promise<void> {
+    await api.put('/jobs/reorder', { order });
+  },
+
+  async saveQueryHistory(jobId: string, history: Omit<QueryHistory, 'timestamp'>): Promise<void> {
+    await api.post(`/jobs/${jobId}/query-history`, history);
+  },
+
+  async getQueryHistory(jobId: string): Promise<QueryHistory[]> {
+    const { data } = await api.get<QueryHistory[]>(`/jobs/${jobId}/query-history`);
+    return data;
+  },
+
+  async getQueryHistoryForText(jobId: string, textHash: string): Promise<QueryHistory> {
+    const { data } = await api.get<QueryHistory>(`/jobs/${jobId}/query-history/${textHash}`);
+    return data;
   }
+};
+
+export const authApi = {
+  register(username: string, password: string) {
+    return api.post('/auth/register', { username, password });
+  },
+  login(username: string, password: string) {
+    return api.post('/auth/login', { username, password });
+  },
+  logout() {
+    return api.post('/auth/logout');
+  },
+  getMe() {
+    return api.get('/auth/me');
+  },
+  getApiKey() {
+    return api.get('/auth/api-key');
+  },
+  setApiKey(apiKey: string, provider?: string, model?: string) {
+    return api.post('/auth/api-key', { api_key: apiKey, provider, model });
+  },
+  deleteApiKey() {
+    return api.delete('/auth/api-key');
+  },
 };

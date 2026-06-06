@@ -10,12 +10,12 @@ export default defineConfig({
   server: {
     proxy: {
       // 代理论文资源请求到后端
-      '/api/jobs': {
+      '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       // 代理 AI 聊天请求到后端
-      '/api/chat': {
+      '/chat': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
@@ -23,7 +23,7 @@ export default defineConfig({
       '/artifacts': {
         target: 'http://127.0.0.1:8000/api/jobs',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/artifacts\/([^/]+)/, '/$1/artifacts'),
+        rewrite: (path) => path.replace(/^\/artifacts\//, '/'),
       },
     },
   },

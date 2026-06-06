@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import type { JobState } from '../types/api';
-import { Loader2, CheckCircle2, XCircle, Clock, FileText, Database, Trash2 } from 'lucide-vue-next';
+import { Loader2, CheckCircle2, XCircle, Clock, FileText, Database, GripVertical } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 
 const props = defineProps<{ job: JobState }>();
-const emit = defineEmits<{
-  delete: [jobId: string];
-}>();
 const router = useRouter();
 
-// 状态对应的 UI 配置
+let pointerStartX = 0;
+let pointerStartY = 0;
+
 const statusUI = {
   completed: { color: 'text-emerald-600 bg-emerald-50', icon: CheckCircle2, label: '已完成' },
   error: { color: 'text-rose-600 bg-rose-50', icon: XCircle, label: '失败' },
@@ -27,28 +26,29 @@ const goToDetail = () => {
   router.push(`/jobs/${props.job.jobId}`);
 };
 
-// 删除任务
-const deleteJob = (e: Event) => {
-  e.stopPropagation(); // 阻止事件冒泡，避免触发goToDetail
-  if (confirm('确定要删除这个任务吗？')) {
-    emit('delete', props.job.jobId);
-  }
+const onPointerDown = (e: PointerEvent) => {
+  pointerStartX = e.clientX;
+  pointerStartY = e.clientY;
 };
 
+const onPointerUp = (e: PointerEvent) => {
+  const dx = Math.abs(e.clientX - pointerStartX);
+  const dy = Math.abs(e.clientY - pointerStartY);
+  if (dx < 5 && dy < 5) {
+    goToDetail();
+  }
+};
 </script>
 
 <template>
   <div 
-    @click="goToDetail"
-    class="glass-card rounded-3xl p-6 transition-all hover:scale-[1.02] hover:shadow-2xl cursor-pointer group relative"
+    @pointerdown="onPointerDown"
+    @pointerup="onPointerUp"
+    class="glass-card rounded-3xl p-6 transition-all hover:scale-[1.02] hover:shadow-2xl cursor-pointer relative group select-none"
   >
-    <!-- 删除按钮 -->
-    <button 
-      @click="deleteJob"
-      class="absolute top-4 right-4 p-2 bg-white/80 hover:bg-white rounded-full text-slate-500 hover:text-rose-600 transition-all opacity-0 group-hover:opacity-100 z-10 shadow-sm"
-    >
-      <Trash2 :size="14" />
-    </button>
+    <div class="absolute top-3 right-3 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+      <GripVertical :size="14" class="text-slate-300" />
+    </div>
     
     <div class="flex justify-between items-start mb-6">
       <div class="flex flex-col">

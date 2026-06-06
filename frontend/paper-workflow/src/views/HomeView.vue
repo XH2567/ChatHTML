@@ -1,16 +1,26 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { jobApi } from '../api/client';
 import type { JobState } from '../types/api';
+import draggable from 'vuedraggable';
 import JobCard from '../components/JobCard.vue';
 import NewJobModal from '../components/NewJobModel.vue';
 import SettingsModal from '../components/SettingsModal.vue';
-import { Plus, RefreshCw, Trash2, Settings } from 'lucide-vue-next';
+import AuthModal from '../components/AuthModal.vue';
+import UserMenu from '../components/UserMenu.vue';
+import { Plus, RefreshCw, Trash2, LogIn } from 'lucide-vue-next';
+import { useAuthStore } from '../stores/auth';
 
+const authStore = useAuthStore();
 const jobs = ref<JobState[]>([]);
 const isRefreshing = ref(false);
 const isModalOpen = ref(false);
-const isSettingsOpen = ref(false);
+const isAuthOpen = ref(false);
+const isApiKeyOpen = ref(false);
+
+const isDragging = ref(false);
+const draggingJobId = ref<string | null>(null);
+const isOverDelete = ref(false);
 
 const refresh = async () => {
   isRefreshing.value = true;
@@ -21,28 +31,14 @@ const refresh = async () => {
   }
 };
 
-// 任务创建成功后的处理
 const onJobCreated = (newJob: JobState) => {
-  jobs.value.unshift(newJob); // 将新任务加到列表开头
+  jobs.value.unshift(newJob);
 };
 
-// 删除单个任务
-const deleteJob = async (jobId: string) => {
-  try {
-    await jobApi.deleteJob(jobId);
-    // 从本地列表中移除
-    jobs.value = jobs.value.filter(job => job.jobId !== jobId);
-  } catch (error) {
-    console.error('删除任务失败:', error);
-  }
-};
-
-// 删除所有任务
 const deleteAllJobs = async () => {
   if (!confirm('确定要删除所有任务吗？此操作不可撤销。')) {
     return;
   }
-  
   try {
     await jobApi.deleteAllJobs();
     jobs.value = [];
@@ -51,12 +47,90 @@ const deleteAllJobs = async () => {
   }
 };
 
-onMounted(refresh);
+const onStart = (e: any) => {
+  isDragging.value = true;
+  draggingJobId.value = jobs.value[e.oldIndex]?.jobId;
+  document.addEventListener('pointermove', onPointerMove);
+  document.body.style.userSelect = 'none';
+};
+
+const onPointerMove = (e: PointerEvent) => {
+  const deleteZone = document.querySelector('.delete-zone');
+  if (!deleteZone) return;
+  const rect = deleteZone.getBoundingClientRect();
+  isOverDelete.value = (
+    e.clientX >= rect.left && e.clientX <= rect.right &&
+    e.clientY >= rect.top && e.clientY <= rect.bottom
+  );
+};
+
+const onEnd = async (e: any) => {
+  document.removeEventListener('pointermove', onPointerMove);
+  document.body.style.userSelect = '';
+  isDragging.value = false;
+  isOverDelete.value = false;
+
+  const deleteZone = document.querySelector('.delete-zone');
+  if (deleteZone && draggingJobId.value) {
+    const rect = deleteZone.getBoundingClientRect();
+    const ev = e.originalEvent;
+    const clientX = ev.clientX ?? ev.changedTouches?.[0]?.clientX;
+    const clientY = ev.clientY ?? ev.changedTouches?.[0]?.clientY;
+
+    if (
+      clientX !== undefined && clientY !== undefined &&
+      clientX >= rect.left && clientX <= rect.right &&
+      clientY >= rect.top && clientY <= rect.bottom
+    ) {
+      if (!confirm('确定要删除这个任务吗？')) {
+        draggingJobId.value = null;
+        return;
+      }
+      try {
+        await jobApi.deleteJob(draggingJobId.value);
+        jobs.value = jobs.value.filter(j => j.jobId !== draggingJobId.value);
+      } catch (error) {
+        console.error('删除任务失败:', error);
+      }
+      draggingJobId.value = null;
+      return;
+    }
+  }
+
+  draggingJobId.value = null;
+  jobApi.reorderJobs(jobs.value.map(j => j.jobId));
+};
+
+const openAuthModal = () => {
+  isAuthOpen.value = true;
+};
+
+const openApiKeyFromMenu = () => {
+  isApiKeyOpen.value = true;
+};
+
+const onAuthChanged = () => {
+  jobs.value = [];
+  if (authStore.isAuthenticated) {
+    refresh();
+  }
+};
+
+watch(() => authStore.userId, (newUserId, oldUserId) => {
+  if (newUserId !== oldUserId) {
+    onAuthChanged();
+  }
+});
+
+onMounted(() => {
+  if (authStore.isAuthenticated) {
+    refresh();
+  }
+});
 </script>
 
 <template>
   <div class="max-w-6xl mx-auto px-6 py-12">
-    <!-- Hero Section -->
     <header class="mb-12 flex justify-between items-end">
       <div>
         <div class="flex items-center gap-2 mb-4">
@@ -70,45 +144,105 @@ onMounted(refresh);
           从 arXiv 或本地源码一键转换论文为交互式 HTML，内置学术 AI 助手。
         </p>
       </div>
-      
+
       <div class="flex gap-3">
-        <button @click="refresh" class="p-4 glass-card rounded-2xl text-slate-600 hover:text-amber-600 transition-colors">
-          <RefreshCw :class="{ 'animate-spin': isRefreshing }" :size="20" />
-        </button>
-        <button @click="deleteAllJobs" class="p-4 glass-card rounded-2xl text-slate-600 hover:text-rose-600 transition-colors">
-          <Trash2 :size="20" />
-        </button>
-        <button @click="isSettingsOpen = true" class="p-4 glass-card rounded-2xl text-slate-600 hover:text-blue-600 transition-colors">
-          <Settings :size="20" />
-        </button>
-        <button @click="isModalOpen = true" 
-          class="flex items-center gap-2 px-6 py-4 bg-amber-600 hover:bg-amber-700 text-white rounded-2xl font-bold shadow-lg shadow-amber-200 transition-all">
-          <Plus :size="20" />
-          新建任务
-        </button>
+        <template v-if="authStore.isAuthenticated">
+          <button @click="refresh" class="p-4 glass-card rounded-2xl text-slate-600 hover:text-amber-600 transition-colors">
+            <RefreshCw :class="{ 'animate-spin': isRefreshing }" :size="20" />
+          </button>
+          <button @click="deleteAllJobs" class="p-4 glass-card rounded-2xl text-slate-600 hover:text-rose-600 transition-colors">
+            <Trash2 :size="20" />
+          </button>
+          <UserMenu :isOpen="true" @close="() => {}" @openApiKey="openApiKeyFromMenu" />
+          <button @click="isModalOpen = true"
+            class="flex items-center gap-2 px-6 py-4 bg-amber-600 hover:bg-amber-700 text-white rounded-2xl font-bold shadow-lg shadow-amber-200 transition-all">
+            <Plus :size="20" />
+            新建任务
+          </button>
+        </template>
+        <template v-else>
+          <button @click="openAuthModal"
+            class="flex items-center gap-2 px-6 py-4 bg-amber-600 hover:bg-amber-700 text-white rounded-2xl font-bold shadow-lg shadow-amber-200 transition-all">
+            <LogIn :size="20" />
+            登录 / 注册
+          </button>
+        </template>
       </div>
     </header>
 
-    <!-- Main Grid -->
     <main>
-      <div v-if="jobs.length === 0" class="text-center py-24 glass-card rounded-[3rem] border-dashed">
+      <div v-if="!authStore.isAuthenticated" class="text-center py-24 glass-card rounded-[3rem] border-dashed">
+        <p class="text-slate-400 font-medium mb-4">请登录后使用论文处理功能</p>
+        <button @click="openAuthModal" class="px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold transition-colors">
+          登录 / 注册
+        </button>
+      </div>
+      <div v-else-if="jobs.length === 0" class="text-center py-24 glass-card rounded-[3rem] border-dashed">
         <p class="text-slate-400 font-medium">还没有任务，开始提交你的第一篇论文吧。</p>
       </div>
-      
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <JobCard v-for="job in jobs" :key="job.jobId" :job="job" @delete="deleteJob" />
+      <!-- 卡片区域：z-50 保持在磨砂层之上 -->
+      <div v-else class="relative z-50">
+        <draggable
+          v-model="jobs"
+          item-key="jobId"
+          :animation="200"
+          :ghost-class="isOverDelete ? '' : 'dragging-ghost'"
+          @start="onStart"
+          @end="onEnd"
+          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 select-none"
+        >
+          <template #item="{ element }">
+            <JobCard :job="element" />
+          </template>
+        </draggable>
       </div>
     </main>
-    <NewJobModal 
-      v-if="isModalOpen" 
-      @close="isModalOpen = false" 
-      @success="onJobCreated" 
+
+    <!-- 拖拽磨砂背景 -->
+    <div
+      v-if="isDragging"
+      class="fixed inset-0 z-40 bg-white/30 backdrop-blur-sm transition-all duration-300"
+    ></div>
+
+    <!-- 拖拽删除栏 -->
+    <div
+      v-if="isDragging"
+      class="delete-zone fixed bottom-0 left-0 right-0 z-[60] flex justify-center"
+    >
+      <div
+        class="w-full flex items-center justify-center gap-3 px-10 pt-5 pb-8 rounded-t-2xl border-2 border-dashed border-b-0 transition-all duration-200"
+        :class="isOverDelete
+          ? 'bg-rose-100/80 border-rose-400 text-rose-600'
+          : 'bg-white/60 border-slate-300 text-slate-400'"
+      >
+        <Trash2 :size="22" />
+        <span class="text-base font-bold">拖到这里删除</span>
+      </div>
+    </div>
+
+    <NewJobModal
+      v-if="isModalOpen && authStore.isAuthenticated"
+      @close="isModalOpen = false"
+      @success="onJobCreated"
     />
-    <SettingsModal 
-      v-if="isSettingsOpen" 
-      :isOpen="isSettingsOpen"
-      @close="isSettingsOpen = false"
-      @saved="refresh"
+    <SettingsModal
+      v-if="isApiKeyOpen"
+      :isOpen="isApiKeyOpen"
+      @close="isApiKeyOpen = false"
+    />
+    <AuthModal
+      v-if="isAuthOpen"
+      @close="isAuthOpen = false"
     />
   </div>
 </template>
+
+<style>
+.dragging-ghost {
+  opacity: 1;
+  background: rgba(251, 191, 36, 0.08);
+  outline: 2px dashed #f59e0b;
+  outline-offset: -2px;
+  border-radius: 1.5rem;
+}
+</style>
