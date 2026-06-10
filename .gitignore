@@ -3,6 +3,7 @@ backend/paper-workflow/target/
 backend/paper-workflow/jobs/
 __pycache__/
 frontend/paper-workflow/public/artifacts/
+frontend/paper-workflow/node_modules/
 jobs/
 .kilo/
 *.db
