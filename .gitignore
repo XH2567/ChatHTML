@@ -5,3 +5,4 @@ __pycache__/
 frontend/paper-workflow/public/artifacts/
 jobs/
 .kilo/
+*.db

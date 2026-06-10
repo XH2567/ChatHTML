@@ -3,7 +3,6 @@ import { ref } from 'vue';
 import { jobApi } from '../api/client';
 import { X, Upload, Hash, Loader2, AlertCircle } from 'lucide-vue-next';
 
-// 定义事件，让父组件知道任务创建成功了
 const emit = defineEmits(['close', 'success']);
 
 const sourceMode = ref<'upload' | 'arxiv'>('upload');
@@ -16,7 +15,7 @@ const handleFileChange = (e: Event) => {
   const target = e.target as HTMLInputElement;
   if (target.files) {
     selectedFile.value = target.files[0];
-    validationError.value = null; // 选择文件后清除错误提示
+    validationError.value = null;
   }
 };
 

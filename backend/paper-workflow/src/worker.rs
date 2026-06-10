@@ -211,7 +211,6 @@ async fn run_step_with_timeout(
         Ok(Ok(status)) => status.success(),
         Ok(Err(_)) => false,
         Err(_) => {
-            // 超时了，强行杀死子进程
             let _ = child.kill().await;
             tracing::error!("步骤 {} 执行超时 ({:?})，已终止", name, limit);
             false
@@ -283,8 +282,7 @@ async fn run_latexml_pipeline(job: &mut JobState, store: &JobStore) -> Result<()
         "latexml",
         &[
             &format!("--destination={}", rel_xml_path.display()),
-            &format!("--path={}", rel_overlay_dir.display()), // 引入补丁路径
-            // "--includestyles", // 移除以提升速度，HTML转换通常不需要完整样式处理
+            &format!("--path={}", rel_overlay_dir.display()),
             &target_tex,
         ],
         &src_dir,
