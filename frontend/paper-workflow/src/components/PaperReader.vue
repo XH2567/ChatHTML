@@ -91,7 +91,6 @@ const handleGlobalSelection = () => {
   let text = '';
   let selectionObj: Selection | null = null;
 
-  // 先尝试主窗口
   const mainSelection = window.getSelection();
   if (mainSelection && mainSelection.toString().trim()) {
     text = mainSelection.toString().trim();
@@ -99,7 +98,6 @@ const handleGlobalSelection = () => {
     console.log('主窗口选中文本:', text);
   }
 
-  // 如果主窗口没有，尝试 iframe
   if (!text && iframeRef.value?.contentWindow) {
     try {
       const iframeSelection = iframeRef.value.contentWindow.getSelection();
@@ -211,42 +209,6 @@ async function injectMarker(text: string, range: Range, hash?: string) {
     console.log('标记已注入成功, hash:', markerHash);
   } catch (e) {
     console.error('注入标记失败:', e);
-  }
-}
-
-function highlightText(hash: string, highlight: boolean) {
-  const storedRange = markerRanges.value.get(hash);
-  if (!storedRange) return;
-
-  try {
-    const iframeDoc = iframeRef.value?.contentDocument;
-    if (!iframeDoc) return;
-
-    if (highlight) {
-      const existingHighlight = iframeDoc.querySelector(`.ai-query-highlight[data-hash="${hash}"]`);
-      if (existingHighlight) return;
-
-      const highlightSpan = iframeDoc.createElement('span');
-      highlightSpan.className = 'ai-query-highlight';
-      highlightSpan.dataset.hash = hash;
-
-      const contents = storedRange.cloneContents();
-      highlightSpan.appendChild(contents);
-
-      storedRange.deleteContents();
-      storedRange.insertNode(highlightSpan);
-    } else {
-      const highlightSpan = iframeDoc.querySelector(`.ai-query-highlight[data-hash="${hash}"]`);
-      if (highlightSpan) {
-        const parent = highlightSpan.parentNode;
-        while (highlightSpan.firstChild) {
-          parent?.insertBefore(highlightSpan.firstChild, highlightSpan);
-        }
-        parent?.removeChild(highlightSpan);
-      }
-    }
-  } catch (e) {
-    console.error('高亮处理失败:', e);
   }
 }
 
@@ -379,18 +341,14 @@ function findTextInDocument(doc: Document, text: string): Range | null {
 
   const endIndex = index + searchText.length;
 
-  // Build positions within the NORMALIZED content
-  // normalizedPositions[i] = position of segment i's first char in normalized content
   const normSegStarts: number[] = [];
   let pos = 0;
   for (let i = 0; i < segments.length; i++) {
-    // Record the start position of this segment in normalized content
     normSegStarts.push(pos);
     const segNorm = segments[i].text.replace(/\n+/g, '\n');
     pos += segNorm.length;
   }
 
-  // Find start segment
   let startSegIdx = 0;
   for (let i = normSegStarts.length - 1; i >= 0; i--) {
     if (normSegStarts[i] <= index) {
@@ -400,7 +358,6 @@ function findTextInDocument(doc: Document, text: string): Range | null {
   }
   const startOffsetInNorm = index - normSegStarts[startSegIdx];
 
-  // Find end segment
   let endSegIdx = 0;
   for (let i = normSegStarts.length - 1; i >= 0; i--) {
     if (normSegStarts[i] < endIndex) {
@@ -410,7 +367,6 @@ function findTextInDocument(doc: Document, text: string): Range | null {
   }
   const endOffsetInNorm = endIndex - normSegStarts[endSegIdx];
 
-  // Map normalized offset to original text node offset
   const startSeg = segments[startSegIdx];
   const endSeg = segments[endSegIdx];
   if (!startSeg || !endSeg) return null;
@@ -422,7 +378,6 @@ function findTextInDocument(doc: Document, text: string): Range | null {
       const nc = segText[origPos];
       const isNewline = nc === '\n';
       if (isNewline) {
-        // Consume all consecutive \n in original as 1 in normalized
         let origEnd = origPos;
         while (origEnd < segText.length && segText[origEnd] === '\n') origEnd++;
         if (normPos + 1 <= normOff) {

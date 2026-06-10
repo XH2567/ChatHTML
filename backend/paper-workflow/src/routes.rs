@@ -623,7 +623,6 @@ pub async fn get_out_artifact(
     // 对于 HTML 文件，需要验证 token（确保只有认证用户能访问论文内容）
     // 对于其他静态资源（图片、CSS等），直接放行
     let claims = if file_path.ends_with(".html") || file_path.ends_with(".htm") {
-        // HTML 文件需要认证
         if let Some(token) = extract_token(&headers) {
             match validate_token(&state, &token) {
                 Ok(c) => c,
@@ -638,7 +637,6 @@ pub async fn get_out_artifact(
             return StatusCode::UNAUTHORIZED.into_response();
         }
     } else {
-        // 其他静态资源直接放行，不再验证
         return serve_file(&state, job_id, &file_path).await;
     };
 
@@ -655,7 +653,6 @@ pub async fn get_out_artifact(
     serve_file(&state, job_id, &file_path).await
 }
 
-// 辅助函数：直接服务文件（不再注入 token）
 async fn serve_file(state: &Arc<AppState>, job_id: Uuid, file_path: &str) -> Response<Body> {
     let full_path = state.store.get_job_file_path(job_id, "out", file_path);
 

@@ -1,12 +1,37 @@
 use axum::{
     Router,
+    body::Body,
+    http::{Request, StatusCode},
+    middleware::{self, Next},
+    response::Response,
     routing::{get, post, delete, put},
 };
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+static INDEX_HTML: OnceLock<String> = OnceLock::new();
+
+async fn spa_fallback(
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let response = next.run(request).await;
+    if response.status() == StatusCode::NOT_FOUND {
+        if let Some(html) = INDEX_HTML.get() {
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "text/html")
+                .body(Body::from(html.clone()))
+                .unwrap();
+        }
+    }
+    response
+}
 
 mod ai;
 mod auth;
@@ -38,6 +63,19 @@ async fn main() {
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
+
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let dist_dir = exe_dir.join("dist");
+
+    let index_path = dist_dir.join("index.html");
+    if index_path.exists() {
+        let html = std::fs::read_to_string(&index_path)
+            .expect("failed to read dist/index.html");
+        INDEX_HTML.set(html).ok();
+    }
 
     let app = Router::new()
         .route("/api/auth/register", post(routes::register))
@@ -72,10 +110,13 @@ async fn main() {
         )
         .with_state(app_state)
         .layer(TraceLayer::new_for_http())
-        .layer(cors);
+        .layer(cors)
+        .fallback_service(ServeDir::new(&dist_dir))
+        .layer(middleware::from_fn(spa_fallback));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr).await
+        .expect("无法绑定端口 8000，可能已被其他程序占用。请先关闭占用端口的程序，或更换端口。");
 
     println!("Paper Workflow 后端已启动: http://{}", addr);
     println!("任务存储目录: {}", base_path);
