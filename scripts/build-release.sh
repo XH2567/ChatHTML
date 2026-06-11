@@ -41,30 +41,8 @@ echo ""
 exec ./chat-html
 SCRIPT
 
-cat > "$RELEASE_DIR/start.bat" << 'SCRIPT'
-@echo off
-cd /d "%~dp0"
-echo === ChatHTML Server ===
-echo Backend API:  http://127.0.0.1:8000/api
-echo Frontend UI:  http://127.0.0.1:8000
-echo.
-chat-html.exe
-pause
-SCRIPT
-
-cat > "$RELEASE_DIR/start.command" << 'SCRIPT'
-#!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$DIR"
-echo "=== ChatHTML Server ==="
-echo "Backend API:  http://127.0.0.1:8000/api"
-echo "Frontend UI:  http://127.0.0.1:8000"
-echo ""
-exec ./chat-html
-SCRIPT
-
 chmod +x "$RELEASE_DIR/start.sh"
-chmod +x "$RELEASE_DIR/start.command"
+chmod +x "$RELEASE_DIR/chat-html"
 
 echo ""
 echo "=== Release ready at: $RELEASE_DIR ==="
