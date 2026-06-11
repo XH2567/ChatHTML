@@ -236,16 +236,40 @@ async fn run_latexml_pipeline(job: &mut JobState, store: &JobStore) -> Result<()
     let root_stem = root_tex_path.file_stem().unwrap().to_str().unwrap();
     let root_name = root_tex_path.file_name().unwrap().to_str().unwrap();
 
-    // 使用pdfLatex进行预编译
-    update_stage(job, "预编译", StageStatus::Running, "生成辅助文件...").await;
-    run_step_with_timeout(
-        "pdflatex",
-        &["-interaction=nonstopmode", "-draftmode", root_name],
-        &src_dir,
-        &log_dir.join("preflight.log"),
-        Duration::from_secs(60),
-    )
-    .await;
+    // 检查文档是否使用 fontspec（需要 XeTeX/LuaTeX，与 pdflatex 不兼容）
+    let mut has_fontspec = {
+        let tex_content = tokio::fs::read_to_string(&root_tex_path).await.unwrap_or_default();
+        tex_content.contains("\\usepackage{fontspec}")
+            || tex_content.contains("\\RequirePackage{fontspec}")
+    };
+    if !has_fontspec {
+        let mut sty_entries = tokio::fs::read_dir(&src_dir).await?;
+        while let Some(entry) = sty_entries.next_entry().await? {
+            if entry.path().extension().map_or(false, |e| e == "sty") {
+                if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
+                    if content.contains("\\RequirePackage{fontspec}") {
+                        has_fontspec = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if has_fontspec {
+        update_stage(job, "预编译", StageStatus::Skipped, "文档使用 fontspec，跳过 pdflatex").await;
+    } else {
+        // 使用pdfLatex进行预编译
+        update_stage(job, "预编译", StageStatus::Running, "生成辅助文件...").await;
+        run_step_with_timeout(
+            "pdflatex",
+            &["-interaction=nonstopmode", "-draftmode", root_name],
+            &src_dir,
+            &log_dir.join("preflight.log"),
+            Duration::from_secs(60),
+        )
+        .await;
+    }
 
     // 注入.bib，处理参考文献
     let bbl_path = src_dir.join(format!("{}.bbl", root_stem));
@@ -266,9 +290,14 @@ async fn run_latexml_pipeline(job: &mut JobState, store: &JobStore) -> Result<()
     let shim = "package LaTeXML::Package::Pool; use LaTeXML::Package; DefMacro('\\tcbuselibrary{}', ''); 1;";
     tokio::fs::write(overlay_dir.join("tcolorbox.sty.ltxml"), shim).await?;
 
-    // 为 LaTeXML 不擅长处理的包添加 shim（跳过耗时转换）
     let expl3_shim = "package LaTeXML::Package::Pool; use LaTeXML::Package; DefMacro('\\ExplSyntaxOn', ''); DefMacro('\\ExplSyntaxOff', ''); 1;";
     tokio::fs::write(overlay_dir.join("expl3.sty.ltxml"), expl3_shim).await?;
+
+    let xparse_shim = "package LaTeXML::Package::Pool; use LaTeXML::Package; DefMacro('\\NewDocumentCommand{}{}{}', ''); DefMacro('\\DeclareDocumentCommand{}{}{}', ''); DefMacro('\\ProvideDocumentCommand{}{}{}', ''); DefMacro('\\RenewDocumentCommand{}{}{}', ''); DefMacro('\\NewDocumentEnvironment{}{}{}{}', ''); DefMacro('\\DeclareDocumentEnvironment{}{}{}{}', ''); 1;";
+    tokio::fs::write(overlay_dir.join("xparse.sty.ltxml"), xparse_shim).await?;
+
+    let bxcoloremoji_shim = "package LaTeXML::Package::Pool; use LaTeXML::Package; DefMacro('\\coloremoji{}', ''); DefMacro('\\coloremoji*{}', ''); 1;";
+    tokio::fs::write(overlay_dir.join("bxcoloremoji.sty.ltxml"), bxcoloremoji_shim).await?;
 
     let siunitx_shim = "package LaTeXML::Package::Pool; use LaTeXML::Package; DefMacro('\\SI', '#1#2'); DefMacro('\\si', '#1'); DefMacro('\\num', '#1'); DefMacro('\\unit', '#1'); 1;";
     tokio::fs::write(overlay_dir.join("siunitx.sty.ltxml"), siunitx_shim).await?;

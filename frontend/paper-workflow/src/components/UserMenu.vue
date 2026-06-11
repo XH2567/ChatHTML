@@ -48,7 +48,7 @@ const openApiKeySettings = () => {
 
     <div
       v-if="showDropdown"
-      class="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1 z-50"
+      class="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1 z-[70]"
     >
       <button
         @click="openApiKeySettings"

@@ -23,20 +23,21 @@ pdflatex --version
 
 ## 使用方法
 
-### Linux / macOS
+### 首次使用前 — 赋予权限
+
+首次使用前，需要为可执行文件和启动脚本添加执行权限：
 
 ```bash
-chmod +x start.sh
+chmod +x chat-html start.sh
+```
+
+### 启动服务
+
+```bash
 ./start.sh
 ```
 
-或直接双击 `start.sh`（macOS 双击 `start.command`）。
-
-### Windows
-
-双击 `start.bat`。
-
-启动服务后打开浏览器访问 `http://127.0.0.1:8000`。
+启动后打开浏览器访问 `http://127.0.0.1:8000`。
 
 ---
 
@@ -74,12 +75,10 @@ chmod +x start.sh
 
 ```
 chathtml-release/
-├── chat-html              # 服务器程序
+├── chat-html              # 服务器程序（需要执行权限）
 ├── dist/                  # 前端页面（一般无需修改）
 ├── ai_config.json         # AI 提供商配置
-├── start.sh               # Linux 启动脚本
-├── start.bat              # Windows 启动脚本
-├── start.command          # macOS 启动脚本
+├── start.sh               # Linux 启动脚本（需要执行权限）
 └── README.md              # 本文件
 ```
 
